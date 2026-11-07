@@ -4,11 +4,13 @@ from core.importador import ImportadorDXF
 from core.reglas import ReglasFAR, VERSION_REGLAS
 import json
 
+# Configuración de la página
 st.set_page_config(page_title="FARcilito - CEV", layout="wide")
 
 st.title("🏠 FARcilito")
 st.caption(f"Herramienta Asistida FAR - CEV | Reglas: {VERSION_REGLAS}")
 
+# --- BARRA LATERAL: CARGA DE ARCHIVOS ---
 with st.sidebar:
     st.header("1. Importar Geometría")
     archivo_dxf = st.file_uploader("Sube un archivo DXF", type=["dxf"])
@@ -22,6 +24,7 @@ with st.sidebar:
             entidades = importador.extraer_geometria()
             st.success(f"DXF cargado: {len(entidades)} entidades.")
             st.session_state['entidades'] = entidades
+            # Si se sube un archivo nuevo, limpiamos el cálculo anterior
             if 'resultado_abd' in st.session_state:
                 del st.session_state['resultado_abd']
         except Exception as e:
@@ -30,20 +33,22 @@ with st.sidebar:
     st.markdown("---")
     st.warning("⚠️ **Cálculo FAR Bloqueado** hasta validar ecuación con MINVU.")
 
+# --- ÁREA PRINCIPAL ---
 if 'entidades' in st.session_state:
     entidades = st.session_state['entidades']
     
-    # Aseguramos que los datos del cálculo estén disponibles para el dibujo
+    # Inicializamos el estado si no existe
     if 'resultado_abd' not in st.session_state:
         st.session_state['resultado_abd'] = None
 
     col1, col2 = st.columns([2, 1])
     
+    # --- COLUMNA IZQUIERDA: VISOR GRÁFICO ---
     with col1:
         st.subheader("Visor Geométrico (DXF)")
         fig = go.Figure()
         
-        # Dibujar todas las entidades
+        # 1. Dibujar todas las entidades del DXF
         for ent in entidades:
             x_vals = [p[0] for p in ent['puntos']]
             y_vals = [p[1] for p in ent['puntos']]
@@ -60,7 +65,7 @@ if 'entidades' in st.session_state:
                 hoverinfo='name'
             ))
         
-        # Si hay un cálculo, dibujamos la línea de medición B
+        # 2. Si hay un cálculo, dibujar la línea de medición B
         if st.session_state['resultado_abd'] is not None:
             res = st.session_state['resultado_abd']
             f_pts = res['fachada_puntos']
@@ -69,6 +74,7 @@ if 'entidades' in st.session_state:
             cf = ReglasFAR.calcular_centro_polilinea(f_pts)
             co = ReglasFAR.calcular_centro_polilinea(o_pts)
             
+            # Línea amarilla punteada
             fig.add_trace(go.Scatter(
                 x=[cf[0], co[0]], y=[cf[1], co[1]],
                 mode='lines+markers',
@@ -77,6 +83,7 @@ if 'entidades' in st.session_state:
                 name='Línea de Medición B'
             ))
             
+            # Etiqueta con el valor de B en el medio de la línea
             fig.add_annotation(
                 x=(cf[0]+co[0])/2, y=(cf[1]+co[1])/2,
                 text=f"B: {res['B']}m",
@@ -86,6 +93,7 @@ if 'entidades' in st.session_state:
                 borderpad=4
             )
 
+        # Configuración visual del gráfico
         fig.update_layout(
             title="Planta 2D",
             yaxis=dict(scaleanchor="x", scaleratio=1),
@@ -95,8 +103,9 @@ if 'entidades' in st.session_state:
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig, use_container_width=True)
-        st.info("💡 Usa la barra de herramientas del gráfico para descargar la imagen.")
+        st.info("💡 Usa la barra de herramientas del gráfico para descargar la imagen del plano.")
 
+    # --- COLUMNA DERECHA: PANEL DE REVISIÓN ---
     with col2:
         st.subheader("Revisión de Parámetros")
         handles = {e['handle']: e for e in entidades}
@@ -105,10 +114,13 @@ if 'entidades' in st.session_state:
             fachada_handle = st.selectbox("Handle de la Fachada", list(handles.keys()))
             obstaculo_handle = st.selectbox("Handle de la Obstrucción", list(handles.keys()))
             
-            if st.form_submit_button("Calcular A, B y D"):
+            submit = st.form_submit_button("Calcular A, B y D")
+            
+            if submit:
                 fachada = handles[fachada_handle]
                 obstaculo = handles[obstaculo_handle]
                 
+                # Llamada a las reglas geométricas
                 params = ReglasFAR.calcular_parametros_geometricos(
                     fachada['puntos'], 
                     obstaculo['puntos'],
@@ -118,26 +130,35 @@ if 'entidades' in st.session_state:
                 division_calc, angulo = ReglasFAR.calcular_division_obstaculo(
                     fachada['puntos'], obstaculo['puntos']
                 )
+                
+                # Guardamos todo en el diccionario
                 params['division'] = division_calc
                 params['angulo'] = angulo
                 params['fachada_puntos'] = fachada['puntos']
                 params['obstaculo_puntos'] = obstaculo['puntos']
                 
+                # Guardamos en memoria y forzamos recarga para que se dibuje la línea
                 st.session_state['resultado_abd'] = params
-                # Nota: El st.success aquí abajo se mostrará al refrescar
-        
+                st.rerun() 
+
+        # --- MOSTRAR RESULTADOS (Si ya se calculó algo) ---
         if st.session_state['resultado_abd'] is not None:
             res = st.session_state['resultado_abd']
+            st.success("✅ Cálculo realizado")
             
+            # Campos de solo lectura
             st.number_input("Distancia B (m)", value=res['B'], disabled=True)
             st.number_input("Distancia D (m)", value=res['D'], disabled=True)
             
+            # Campo interactivo para la altura
             nueva_altura = st.number_input("Distancia A (m) [Altura del Edificio]", value=res['A'], step=0.5)
             res['A'] = nueva_altura 
             
             st.info(f"📍 División **{res['division']}** (Ángulo: {res['angulo']}°)")
             
             st.markdown("---")
+            
+            # Botón de exportación JSON
             export_data = {
                 "version_reglas": VERSION_REGLAS,
                 "fachada_id": fachada_handle,
