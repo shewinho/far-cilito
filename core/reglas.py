@@ -6,7 +6,6 @@ VERSION_REGLAS = "CEV_2025_Oficial"
 class ReglasFAR:
     @staticmethod
     def asegurar_poligono(puntos):
-        """Convierte cualquier lista de puntos en una figura válida sin que el programa falle."""
         pts = list(puntos)
         if len(pts) < 3:
             return LineString(pts).buffer(0.05)
@@ -19,10 +18,6 @@ class ReglasFAR:
 
     @staticmethod
     def obtener_tramo_fachada(fachada_puntos, obstaculo_puntos):
-        """
-        Encuentra el muro de la vivienda que mira hacia el obstáculo
-        y devuelve su punto medio fijo y su dirección perpendicular (Regla MINVU 6.8).
-        """
         poly_obs = ReglasFAR.asegurar_poligono(obstaculo_puntos)
         centro_obs = poly_obs.centroid
 
@@ -51,12 +46,11 @@ class ReglasFAR:
             pm = seg.interpolate(0.5, normalized=True)
             dx, dy = p2[0] - p1[0], p2[1] - p1[1]
 
-            # Vector perpendicular apuntando hacia afuera de la vivienda
+            # Vector normal hacia afuera de la vivienda
             nx, ny = -dy, dx
             if (nx * (pm.x - centro_casa.x) + ny * (pm.y - centro_casa.y)) < 0:
                 nx, ny = dy, -dx
 
-            # Verificamos si el obstáculo está frente a esta cara
             dot = nx * (centro_obs.x - pm.x) + ny * (centro_obs.y - pm.y)
             dist = pm.distance(centro_obs)
             if dot > 0 and dist < menor_dist:
@@ -71,7 +65,7 @@ class ReglasFAR:
         return mejor_pm, mejor_normal
 
     @staticmethod
-    def construir_sectores_cev(punto_fachada, angulo_normal_rad, radio=200.0):
+    def construir_sectores_cev(punto_fachada, angulo_normal_rad, radio=300.0):
         """
         Crea las 5 divisiones de 36° del semicírculo CEV (Div 1 a 5 de izq a der mirando desde adentro).
         """
@@ -111,17 +105,18 @@ class ReglasFAR:
             if recorte.is_empty or recorte.area < 0.01:
                 continue
 
-            # Centro geométrico de la parte del obstáculo dentro de esta división (Figura 39 CEV)
+            # Punto medio de la porción del obstáculo dentro de esta división
             punto_obstaculo = recorte.centroid
             distancia_b = punto_fachada.distance(punto_obstaculo)
 
+            # Dirección de la línea B
             dx = punto_obstaculo.x - punto_fachada.x
             dy = punto_obstaculo.y - punto_fachada.y
             angulo_b_rad = math.atan2(dy, dx)
 
-            # Ancho D perpendicular (90°) a la línea B pasando por el centro (Figura 40 CEV)
+            # Línea D: Perpendicular estricta (90°) a la línea B pasando por el punto medio
             angulo_perp = angulo_b_rad + math.pi / 2.0
-            largo = 150.0
+            largo = 300.0
             p1 = Point(punto_obstaculo.x - largo * math.cos(angulo_perp),
                        punto_obstaculo.y - largo * math.sin(angulo_perp))
             p2 = Point(punto_obstaculo.x + largo * math.cos(angulo_perp),
