@@ -5,37 +5,43 @@ VERSION_REGLAS = "CEV_2025_Oficial"
 
 class ReglasFAR:
     @staticmethod
+    def asegurar_poligono(puntos):
+        """Convierte cualquier lista de puntos en una figura válida sin que el programa falle."""
+        pts = list(puntos)
+        if len(pts) < 3:
+            return LineString(pts).buffer(0.05)
+        if pts[0] != pts[-1]:
+            pts.append(pts[0])
+        poly = Polygon(pts)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        return poly
+
+    @staticmethod
     def obtener_tramo_fachada(fachada_puntos, obstaculo_puntos):
         """
-        Identifica el tramo o cara de la vivienda que mira hacia el obstáculo
-        y obtiene su punto medio fijo y su ángulo normal exterior (Regla MINVU 6.8).
+        Encuentra el muro de la vivienda que mira hacia el obstáculo
+        y devuelve su punto medio fijo y su dirección perpendicular (Regla MINVU 6.8).
         """
-        pts = list(fachada_puntos)
-        if len(pts) >= 3 and pts[0] != pts[-1]:
-            pts.append(pts[0])
-            
-        centro_obs = Polygon(obstaculo_puntos).centroid if len(obstaculo_puntos) >= 3 else Point(obstaculo_puntos[0])
-        
-        # Si es una sola línea (2 puntos), tomamos su punto medio directo
+        poly_obs = ReglasFAR.asegurar_poligono(obstaculo_puntos)
+        centro_obs = poly_obs.centroid
+
         if len(fachada_puntos) == 2:
             p1, p2 = fachada_puntos[0], fachada_puntos[1]
-            pm = Point((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+            pm = Point((p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0)
             dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-            # Vector normal que apunte hacia el obstáculo
             nx, ny = -dy, dx
             if (nx * (centro_obs.x - pm.x) + ny * (centro_obs.y - pm.y)) < 0:
                 nx, ny = dy, -dx
-            angulo_normal = math.atan2(ny, nx)
-            return pm, angulo_normal
+            return pm, math.atan2(ny, nx)
 
-        # Si es el polígono de la vivienda, buscamos el muro específico que enfrenta al obstáculo
-        poly_casa = Polygon(pts)
+        poly_casa = ReglasFAR.asegurar_poligono(fachada_puntos)
+        coords = list(poly_casa.exterior.coords)
+        centro_casa = poly_casa.centroid
+
         mejor_pm = None
         mejor_normal = 0.0
         menor_dist = float('inf')
-
-        coords = list(poly_casa.exterior.coords)
-        centro_casa = poly_casa.centroid
 
         for i in range(len(coords) - 1):
             p1, p2 = coords[i], coords[i+1]
@@ -44,17 +50,14 @@ class ReglasFAR:
                 continue
             pm = seg.interpolate(0.5, normalized=True)
             dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-            
-            # Normal hacia afuera de la casa
+
+            # Vector perpendicular apuntando hacia afuera de la vivienda
             nx, ny = -dy, dx
             if (nx * (pm.x - centro_casa.x) + ny * (pm.y - centro_casa.y)) < 0:
                 nx, ny = dy, -dx
-                
-            # Verificamos si el obstáculo está frente a este muro
-            vec_obs_x = centro_obs.x - pm.x
-            vec_obs_y = centro_obs.y - pm.y
-            dot = nx * vec_obs_x + ny * vec_obs_y
-            
+
+            # Verificamos si el obstáculo está frente a esta cara
+            dot = nx * (centro_obs.x - pm.x) + ny * (centro_obs.y - pm.y)
             dist = pm.distance(centro_obs)
             if dot > 0 and dist < menor_dist:
                 menor_dist = dist
@@ -70,10 +73,8 @@ class ReglasFAR:
     @staticmethod
     def construir_sectores_cev(punto_fachada, angulo_normal_rad, radio=200.0):
         """
-        Crea los 5 conos de 36° del semicírculo CEV (División 1 a 5 de izq a der mirando desde adentro).
+        Crea las 5 divisiones de 36° del semicírculo CEV (Div 1 a 5 de izq a der mirando desde adentro).
         """
-        # Mirando desde el interior hacia afuera:
-        # Izquierda es +90° a +54° (Div 1), Derecha es -54° a -90° (Div 5)
         limites_cev = {
             1: (54, 90),
             2: (18, 54),
@@ -95,11 +96,10 @@ class ReglasFAR:
 
     @staticmethod
     def calcular_parametros_geometricos(fachada_puntos, obstaculo_puntos, obstaculo_capa="", h_fachada=1.5):
-        poly_obs = Polygon(obstaculo_puntos)
+        poly_obs = ReglasFAR.asegurar_poligono(obstaculo_puntos)
         punto_fachada, angulo_normal = ReglasFAR.obtener_tramo_fachada(fachada_puntos, obstaculo_puntos)
         sectores = ReglasFAR.construir_sectores_cev(punto_fachada, angulo_normal)
 
-        # Altura según capa por defecto (editable en la barra lateral)
         capa_up = obstaculo_capa.upper()
         h_obs = 15.0 if "EDIFICIO" in capa_up else (3.0 if "ELEMENTO" in capa_up else 5.0)
         altura_a = max(0.0, h_obs - h_fachada)
@@ -108,20 +108,19 @@ class ReglasFAR:
 
         for div_num, poly_sector in sectores.items():
             recorte = poly_obs.intersection(poly_sector)
-            if recorte.is_empty or recorte.area < 0.05:
+            if recorte.is_empty or recorte.area < 0.01:
                 continue
 
-            # Punto medio de la porción del obstáculo dentro de esta división (Figura 39 CEV)
+            # Centro geométrico de la parte del obstáculo dentro de esta división (Figura 39 CEV)
             punto_obstaculo = recorte.centroid
             distancia_b = punto_fachada.distance(punto_obstaculo)
 
-            # Dirección de la línea B
             dx = punto_obstaculo.x - punto_fachada.x
             dy = punto_obstaculo.y - punto_fachada.y
             angulo_b_rad = math.atan2(dy, dx)
 
-            # Línea D: 90° perpendicular a la línea B pasando por el centro de la obstrucción (Figura 40 CEV)
-            angulo_perp = angulo_b_rad + math.pi / 2
+            # Ancho D perpendicular (90°) a la línea B pasando por el centro (Figura 40 CEV)
+            angulo_perp = angulo_b_rad + math.pi / 2.0
             largo = 150.0
             p1 = Point(punto_obstaculo.x - largo * math.cos(angulo_perp),
                        punto_obstaculo.y - largo * math.sin(angulo_perp))
@@ -134,18 +133,20 @@ class ReglasFAR:
                 p_D1, p_D2 = punto_obstaculo, punto_obstaculo
                 ancho_d = 0.0
             else:
-                # Extraemos los puntos extremos del cruce perpendicular dentro de la división
                 coords_d = []
                 if hasattr(inter_d, 'geoms'):
                     for g in inter_d.geoms:
                         coords_d.extend(list(g.coords))
                 else:
                     coords_d = list(inter_d.coords)
-                p_D1 = Point(coords_d[0])
-                p_D2 = Point(coords_d[-1])
-                ancho_d = p_D1.distance(p_D2)
+                if len(coords_d) >= 2:
+                    p_D1 = Point(coords_d[0])
+                    p_D2 = Point(coords_d[-1])
+                    ancho_d = p_D1.distance(p_D2)
+                else:
+                    p_D1, p_D2 = punto_obstaculo, punto_obstaculo
+                    ancho_d = 0.0
 
-            # Ángulo relativo respecto a la normal de la fachada
             dif_ang = math.degrees(angulo_b_rad - angulo_normal)
             while dif_ang > 180: dif_ang -= 360
             while dif_ang < -180: dif_ang += 360
@@ -160,11 +161,9 @@ class ReglasFAR:
                 "punto_obstaculo": (punto_obstaculo.x, punto_obstaculo.y),
                 "p_D1": (p_D1.x, p_D1.y),
                 "p_D2": (p_D2.x, p_D2.y),
-                "angulo_rad_B": angulo_normal, # El semicírculo queda fijo mirando al frente de la fachada
-                "todas_las_divisiones": divisiones_afectadas
+                "angulo_rad_B": angulo_normal
             })
 
-        # Si el obstáculo estaba detrás de la fachada o fuera del semicírculo de 180°
         if not divisiones_afectadas:
             po_fallback = poly_obs.centroid
             return {
@@ -178,8 +177,9 @@ class ReglasFAR:
                 "p_D1": (po_fallback.x, po_fallback.y),
                 "p_D2": (po_fallback.x, po_fallback.y),
                 "angulo_rad_B": angulo_normal,
-                "todas_las_divisiones": []
+                "divisiones_lista": []
             }
 
-        # Devolvemos la división principal (y adentro lleva guardadas todas si cruza más de una)
-        return divisiones_afectadas[0]
+        resultado_principal = dict(divisiones_afectadas[0])
+        resultado_principal["divisiones_lista"] = divisiones_afectadas
+        return resultado_principal
