@@ -71,6 +71,25 @@ if 'entidades' in st.session_state:
             obstaculo_handle = st.selectbox("Handle de la Obstrucción", list(handles.keys()))
             
             if st.form_submit_button("Calcular A, B y D"):
+                            if st.form_submit_button("Calcular A, B y D"):
+                fachada = handles[fachada_handle]
+                obstaculo = handles[obstaculo_handle]
+                
+                params = ReglasFAR.calcular_parametros_geometricos(
+                    fachada['puntos'], 
+                    obstaculo['puntos'],
+                    obstaculo['capa']
+                )
+                
+                # NUEVO: Calcular la división
+                division_calc, angulo = ReglasFAR.calcular_division_obstaculo(
+                    fachada['puntos'], obstaculo['puntos']
+                )
+                params['division'] = division_calc
+                params['angulo'] = angulo
+                
+                st.session_state['resultado_abd'] = params
+                st.success("Cálculo geométrico y de división realizado.")
                 fachada = handles[fachada_handle]
                 obstaculo = handles[obstaculo_handle]
                 
@@ -85,3 +104,4 @@ if 'entidades' in st.session_state:
                 st.number_input("Distancia B (m) calculada", value=res['B'], disabled=True)
                 st.number_input("Distancia D (m) calculada", value=res['D'], disabled=True)
                 a_manual = st.number_input("Distancia A (m) [Requiere altura]", value=res['A'], step=0.1)
+                st.info(f"📍 El obstáculo cae en la **División {res['division']}** (Ángulo: {res['angulo']}°)")
