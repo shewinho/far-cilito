@@ -22,8 +22,9 @@ with st.sidebar:
             st.success(f"DXF cargado: {len(entidades)} entidades.")
             st.session_state['entidades'] = entidades
             # Limpiamos resultados anteriores si se sube un archivo nuevo
-            if 'resultado_abd' in st.session_state:
-                del st.session_state['resultado_abd']
+                    # Si hay un cálculo, dibujamos la línea de medición B
+        if st.session_state['resultado_abd'] is not None:
+            res = st.session_state['resultado_abd']
         except Exception as e:
             st.error(f"Error al leer DXF: {e}")
 
@@ -34,6 +35,9 @@ if 'entidades' in st.session_state:
     entidades = st.session_state['entidades']
     
     col1, col2 = st.columns([2, 1])
+        # Aseguramos que los datos del cálculo estén disponibles para el dibujo
+    if 'resultado_abd' not in st.session_state:
+        st.session_state['resultado_abd'] = None
     
     with col1:
         st.subheader("Visor Geométrico (DXF)")
@@ -86,13 +90,14 @@ if 'entidades' in st.session_state:
                 borderpad=4
             )
 
-        fig.update_layout(
+                fig.update_layout(
             title="Planta 2D",
             yaxis=dict(scaleanchor="x", scaleratio=1),
             height=600,
             template="plotly_dark",
-            margin=dict(l=0, r=0, t=30, b=0),
+            margin=dict(l=0, r=0, t=80, b=0), # t=80 para dar espacio arriba
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         )
         st.plotly_chart(fig, use_container_width=True)
         st.info("💡 Usa la barra de herramientas (arriba a la derecha del gráfico) para descargar la imagen del plano con las mediciones.")
