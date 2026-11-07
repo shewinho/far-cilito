@@ -75,7 +75,7 @@ if 'entidades' in st.session_state:
                 obstaculo = handles[obstaculo_handle]
                 
                 # Llamada a la regla de cálculo
-                params = ReglasFAR.calcular_parametros_geometricos(fachada['puntos'], obstaculo['puntos'])
+                params = ReglasFAR.calcular_parametros_geometricos(fachada['puntos'], obstaculo['puntos'], obstaculo['capa'])
                 
                 st.session_state['resultado_abd'] = params
                 st.success("Cálculo geométrico realizado.")
