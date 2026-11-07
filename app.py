@@ -37,26 +37,24 @@ if 'entidades' in st.session_state:
 
     col1, col2 = st.columns([2, 1])
     
+    # --- COLUMNA IZQUIERDA: VISOR GRÁFICO ---
     with col1:
         st.subheader("Visor Geométrico (DXF)")
         fig = go.Figure()
         
-        # --- OPTIMIZACIÓN: Agrupar líneas por capa ---
-        # En lugar de 1 trazo por línea, hacemos 1 trazo por capa.
+        # Agrupar líneas por capa (Optimización)
         capas = {}
         for ent in entidades:
             capa = ent['capa']
             if capa not in capas:
                 capas[capa] = {'x': [], 'y': []}
             
-            # Agregamos un "None" al final para separar las líneas (evita que se unan)
             x_vals = [p[0] for p in ent['puntos']] + [None]
             y_vals = [p[1] for p in ent['puntos']] + [None]
             
             capas[capa]['x'].extend(x_vals)
             capas[capa]['y'].extend(y_vals)
 
-        # Dibujar cada capa agrupada
         for capa, datos in capas.items():
             color = 'blue' if 'VIVIENDA' in capa.upper() else 'gray'
             if 'EDIFICIO' in capa.upper() or 'ELEMENTOS' in capa.upper():
@@ -103,43 +101,45 @@ if 'entidades' in st.session_state:
             margin=dict(l=0, r=0, t=80, b=0),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        # use_container_width=True hace que se adapte a tu pantalla
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
+        st.plotly_chart(fig, use_container_width=True)
         
+    # --- COLUMNA DERECHA: PANEL DE REVISIÓN ---
     with col2:
         st.subheader("Revisión de Parámetros")
         handles = {e['handle']: e for e in entidades}
         
-        # Usamos un form para agrupar los inputs
         with st.form("form_revision"):
             fachada_handle = st.selectbox("Handle de la Fachada", list(handles.keys()))
             obstaculo_handle = st.selectbox("Handle de la Obstrucción", list(handles.keys()))
             submit = st.form_submit_button("Calcular A, B y D")
             
-        # El cálculo se hace FUERA del form para que actualice la vista inmediatamente
-        if submit:
-            fachada = handles[fachada_handle]
-            obstaculo = handles[obstaculo_handle]
-            
-            params = ReglasFAR.calcular_parametros_geometricos(
-                fachada['puntos'], obstaculo['puntos'], obstaculo['capa']
-            )
-            division_calc, angulo = ReglasFAR.calcular_division_obstaculo(
-                fachada['puntos'], obstaculo['puntos']
-            )
-            params['division'] = division_calc
-            params['angulo'] = angulo
-            params['fachada_puntos'] = fachada['puntos']
-            params['obstaculo_puntos'] = obstaculo['puntos']
-            
-            st.session_state['resultado_abd'] = params
+            if submit:
+                fachada = handles[fachada_handle]
+                obstaculo = handles[obstaculo_handle]
+                
+                params = ReglasFAR.calcular_parametros_geometricos(
+                    fachada['puntos'], obstaculo['puntos'], obstaculo['capa']
+                )
+                division_calc, angulo = ReglasFAR.calcular_division_obstaculo(
+                    fachada['puntos'], obstaculo['puntos']
+                )
+                params['division'] = division_calc
+                params['angulo'] = angulo
+                params['fachada_puntos'] = fachada['puntos']
+                params['obstaculo_puntos'] = obstaculo['puntos']
+                
+                st.session_state['resultado_abd'] = params
+                st.rerun() # <--- ESTO HACE QUE EL GRÁFICO SE ACTUALICE
 
+        # --- MOSTRAR RESULTADOS ---
         if st.session_state['resultado_abd'] is not None:
             res = st.session_state['resultado_abd']
             st.success("✅ Cálculo realizado")
             
             st.number_input("Distancia B (m)", value=res['B'], disabled=True)
             st.number_input("Distancia D (m)", value=res['D'], disabled=True)
+            
+            # Al cambiar esto, se actualiza el session_state automáticamente
             nueva_altura = st.number_input("Distancia A (m) [Altura]", value=res['A'], step=0.5)
             res['A'] = nueva_altura 
             
