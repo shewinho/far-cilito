@@ -98,3 +98,25 @@ if 'entidades' in st.session_state:
             a_manual = st.number_input("Distancia A (m) [Requiere altura]", value=res['A'], step=0.1)
             
             st.info(f"📍 El obstáculo cae en la **División {res['division']}** (Ángulo: {res['angulo']}°)")
+                        # --- NUEVO: Botón de Exportación ---
+            st.markdown("---")
+            st.subheader("Exportar Datos")
+            
+            # Creamos un diccionario con toda la información
+            export_data = {
+                "version_reglas": VERSION_REGLAS,
+                "fachada_id": fachada_handle,
+                "obstruccion_id": obstaculo_handle,
+                "capa_obstruccion": handles[obstaculo_handle]['capa'],
+                "parametros": res
+            }
+            
+            import json
+            json_string = json.dumps(export_data, indent=2)
+            
+            st.download_button(
+                label="📥 Descargar Reporte (JSON)",
+                data=json_string,
+                file_name=f"reporte_far_{fachada_handle}_{obstaculo_handle}.json",
+                mime="application/json"
+            )
