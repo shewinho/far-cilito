@@ -4,6 +4,8 @@ from core.importador import ImportadorDXF
 from core.reglas import ReglasFAR, VERSION_REGLAS
 import json
 import time
+import math
+import numpy as np
 
 st.set_page_config(page_title="FARcilito - CEV", layout="wide")
 st.title("🏠 FARcilito")
@@ -13,7 +15,7 @@ st.caption(f"Herramienta Asistida FAR - CEV | Reglas: {VERSION_REGLAS}")
 if 'resultado_abd' not in st.session_state:
     st.session_state['resultado_abd'] = None
 
-# --- BARRA LATERAL: TODO EL CONTROL ---
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.header("1. Importar Geometría")
     archivo_dxf = st.file_uploader("Sube un archivo DXF", type=["dxf"])
@@ -27,14 +29,12 @@ with st.sidebar:
             entidades = importador.extraer_geometria()
             st.success(f"DXF cargado: {len(entidades)} entidades.")
             st.session_state['entidades'] = entidades
-            # Si suben un archivo nuevo, borramos el cálculo anterior
             st.session_state['resultado_abd'] = None 
         except Exception as e:
             st.error(f"Error al leer DXF: {e}")
 
     st.markdown("---")
     
-    # Si hay un archivo cargado, mostramos los controles
     if 'entidades' in st.session_state:
         st.header("2. Revisión de Parámetros")
         handles = {e['handle']: e for e in st.session_state['entidades']}
@@ -42,10 +42,9 @@ with st.sidebar:
         fachada_handle = st.selectbox("Handle de la Fachada", list(handles.keys()))
         obstaculo_handle = st.selectbox("Handle de la Obstrucción", list(handles.keys()))
         
-        # EL BOTÓN ESTÁ EN LA BARRA LATERAL
         if st.button("Calcular A, B y D", use_container_width=True):
-            with st.spinner("Procesando geometría..."): # <--- AQUÍ ESTÁ TU BARRA DE CARGA
-                time.sleep(0.5) # Pausa artificial para que veas el spinner
+            with st.spinner("Procesando geometría y divisiones..."):
+                time.sleep(0.5)
                 
                 fachada = handles[fachada_handle]
                 obstaculo = handles[obstaculo_handle]
@@ -72,17 +71,17 @@ with st.sidebar:
     st.warning("⚠️ **Cálculo FAR Bloqueado** hasta validar ecuación con MINVU.")
 
 
-# --- ÁREA PRINCIPAL: SOLO VISUALIZACIÓN ---
+# --- ÁREA PRINCIPAL ---
 if 'entidades' in st.session_state:
     entidades = st.session_state['entidades']
     
     col1, col2 = st.columns([2.5, 1])
     
     with col1:
-        st.subheader("Visor Geométrico (DXF)")
+        st.subheader("Visor Geométrico y Divisiones FAR")
         fig = go.Figure()
         
-        # Agrupar líneas por capa (Optimización)
+        # 1. Dibujar el DXF
         capas = {}
         for ent in entidades:
             capa = ent['capa']
@@ -102,23 +101,94 @@ if 'entidades' in st.session_state:
                 
             fig.add_trace(go.Scatter(
                 x=datos['x'], y=datos['y'],
-                mode='lines',
-                line=dict(color=color, width=1),
-                name=f"Capa: {capa}",
-                hoverinfo='name'
+                mode='lines', line=dict(color=color, width=1),
+                name=f"Capa: {capa}", hoverinfo='name'
             ))
         
-        # Dibujar la línea de medición si hay cálculo en memoria
+        # 2. Si hay cálculo, dibujar la visualización FAR
         if st.session_state['resultado_abd'] is not None:
             res = st.session_state['resultado_abd']
             cf = ReglasFAR.calcular_centro_polilinea(res['fachada_puntos'])
             co = ReglasFAR.calcular_centro_polilinea(res['obstaculo_puntos'])
             
+            # Radio del arco (proporcional a la distancia B para que se vea bien)
+            radio = max(res['B'] * 1.2, 10) 
+            
+            # --- A. Dibujar el Semicírculo (Arco exterior) ---
+            # Asumimos que la fachada mira al Norte (0°)
+            # El arco va desde -90° (Izquierda) a +90° (Derecha)
+            theta = np.linspace(np.radians(-90), np.radians(90), 100)
+            x_arco = cf[0] + radio * np.sin(theta)
+            y_arco = cf[1] + radio * np.cos(theta)
+            
+            fig.add_trace(go.Scatter(
+                x=x_arco, y=y_arco, mode='lines',
+                line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
+                name='Semicírculo FAR', hoverinfo='skip'
+            ))
+
+            # --- B. Dibujar las Líneas Divisorias (Cada 36°) ---
+            # Ángulos: -90, -54, -18, 18, 54, 90
+            angulos_div = [-90, -54, -18, 18, 54, 90]
+            for ang in angulos_div:
+                rad = np.radians(ang)
+                x_line = [cf[0], cf[0] + radio * np.sin(rad)]
+                y_line = [cf[1], cf[1] + radio * np.cos(rad)]
+                fig.add_trace(go.Scatter(
+                    x=x_line, y=y_line, mode='lines',
+                    line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dot'),
+                    showlegend=False, hoverinfo='skip'
+                ))
+
+            # --- C. Etiquetas de las Divisiones ---
+            # Centros de cada división (promedio de sus límites)
+            centros_div = [-72, -36, 0, 36, 72]
+            for i, ang_centro in enumerate(centros_div):
+                rad = np.radians(ang_centro)
+                # Un poco más adentro del arco para que se lea bien
+                x_txt = cf[0] + (radio * 0.85) * np.sin(rad)
+                y_txt = cf[1] + (radio * 0.85) * np.cos(rad)
+                
+                fig.add_annotation(
+                    x=x_txt, y=y_txt,
+                    text=f"Div {i+1}",
+                    showarrow=False,
+                    font=dict(color="white", size=12),
+                    bgcolor="rgba(0,0,0,0.5)",
+                    borderpad=2
+                )
+
+            # --- D. Resaltar el Sector del Obstáculo ---
+            # Buscamos los límites del sector calculado
+            limites_div = {
+                1: (-90, -54), 2: (-54, -18), 3: (-18, 18), 4: (18, 54), 5: (54, 90)
+            }
+            lim_inf, lim_sup = limites_div[res['division']]
+            
+            # Creamos el polígono del sector resaltado
+            theta_sector = np.linspace(np.radians(lim_inf), np.radians(lim_sup), 50)
+            x_sector = cf[0] + radio * np.sin(theta_sector)
+            y_sector = cf[1] + radio * np.cos(theta_sector)
+            
+            # Cerramos el polígono en el centro
+            x_sector = np.append(x_sector, cf[0])
+            y_sector = np.append(y_sector, cf[1])
+            
+            fig.add_trace(go.Scatter(
+                x=x_sector, y=y_sector,
+                fill='toself',
+                fillcolor='rgba(255, 255, 0, 0.2)', # Amarillo translúcido
+                line=dict(color='yellow', width=2),
+                name=f'División {res["division"]} (Obstáculo)',
+                hoverinfo='skip'
+            ))
+
+            # --- E. Línea de Medición B y Punto del Obstáculo ---
             fig.add_trace(go.Scatter(
                 x=[cf[0], co[0]], y=[cf[1], co[1]],
                 mode='lines+markers',
-                line=dict(color='yellow', width=4, dash='dash'),
-                marker=dict(size=10, color='yellow'),
+                line=dict(color='red', width=3, dash='dash'),
+                marker=dict(size=10, color='red'),
                 name='Medición B'
             ))
             
@@ -126,20 +196,21 @@ if 'entidades' in st.session_state:
                 x=(cf[0]+co[0])/2, y=(cf[1]+co[1])/2,
                 text=f"B: {res['B']}m",
                 showarrow=False,
-                font=dict(color="yellow", size=16),
-                bgcolor="black",
+                font=dict(color="red", size=14),
+                bgcolor="white",
                 borderpad=4
             )
 
+        # Configuración visual
         fig.update_layout(
-            title="Planta 2D",
+            title="Planta 2D con Semicírculo FAR",
             yaxis=dict(scaleanchor="x", scaleratio=1),
             height=700,
             template="plotly_dark",
             margin=dict(l=0, r=0, t=80, b=0),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
         
     with col2:
         st.subheader("Resultados")
