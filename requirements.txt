@@ -2,3 +2,4 @@ streamlit
 ezdxf
 plotly
 pandas
+shapely
