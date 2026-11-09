@@ -35,7 +35,6 @@ with st.sidebar:
         st.header("2. Parámetros Globales")
         entidades = st.session_state['entidades']
         
-        # Filtros automáticos: Casas vs Obstáculos
         casas = [e for e in entidades if 'VIVIENDA' in e['capa'].upper()]
         obstaculos = [e for e in entidades if 'VIVIENDA' not in e['capa'].upper()]
         
@@ -53,7 +52,6 @@ with st.sidebar:
         st.markdown("### Ajuste de Alturas (Obstáculos)")
         st.caption("Modifica la altura de volúmenes complejos si es necesario:")
         
-        # Diccionario para inyectar alturas customizadas antes de procesar
         h_custom_dict = {}
         with st.expander("Editar Alturas de Obstáculos"):
             for obs in obstaculos:
@@ -66,7 +64,6 @@ with st.sidebar:
                 time.sleep(0.5)
                 fachada = fachadas_disp[fachada_key]
                 
-                # Inyectamos las alturas custom a la lista de obstáculos
                 for obs in obstaculos:
                     obs['h_custom'] = h_custom_dict.get(obs['handle'])
                 
@@ -83,8 +80,6 @@ with st.sidebar:
 if 'entidades' in st.session_state and st.session_state['resultados_360'] is not None:
     res_master = st.session_state['resultados_360']
     datos_ori = res_master['datos']
-    
-    # Pestañas para cada orientación encontrada
     orientaciones_detectadas = list(datos_ori.keys())
     
     if not orientaciones_detectadas:
@@ -95,13 +90,11 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
         for idx, tab_name in enumerate(orientaciones_detectadas):
             with tabs[idx]:
                 col1, col2 = st.columns([2.5, 1.2])
-                
                 lista_divs = datos_ori[tab_name]
                 
                 with col1:
                     fig = go.Figure()
                     
-                    # 1. Dibujar Capas (Fondo)
                     for ent in st.session_state['entidades']:
                         capa = ent['capa']
                         pts = list(ent['puntos'])
@@ -118,14 +111,12 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                         angulo_normal = lista_divs[0]['angulo_rad_B']
                         radio = res_master['radio']
                         
-                        # Arco de búsqueda
                         theta = np.linspace(angulo_normal - math.pi/2, angulo_normal + math.pi/2, 100)
                         fig.add_trace(go.Scatter(
                             x=pf[0] + radio * np.cos(theta), y=pf[1] + radio * np.sin(theta), mode='lines',
                             line=dict(color='rgba(255,255,255,0.4)', width=1, dash='dash'), name='Radio de Búsqueda'
                         ))
 
-                        # Rayos divisorios
                         for ang in [-90, -54, -18, 18, 54, 90]:
                             rad = angulo_normal + math.radians(ang)
                             fig.add_trace(go.Scatter(
@@ -135,13 +126,11 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
 
                         limites_cev = {1: (54, 90), 2: (18, 54), 3: (-18, 18), 4: (-54, -18), 5: (-90, -54)}
                         
-                        # Dibujar B y D por cada división ganadora
                         for item in lista_divs:
                             div_id = item['division']
                             po = item['punto_obstaculo']
                             p_D1, p_D2 = item['p_D1'], item['p_D2']
                             
-                            # Relleno del sector
                             lim_inf, lim_sup = limites_cev[div_id]
                             theta_sec = np.linspace(angulo_normal + math.radians(lim_inf), angulo_normal + math.radians(lim_sup), 30)
                             x_sec = np.append(pf[0] + radio * np.cos(theta_sec), pf[0])
@@ -149,19 +138,19 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                             
                             fig.add_trace(go.Scatter(
                                 x=x_sec, y=y_sec, fill='toself', fillcolor='rgba(255, 230, 0, 0.1)',
-                                line=dict(color='yellow', width=1), name=f'Div {div_id} ({item["id_obs"]})'
+                                line=dict(color='yellow', width=1), name=f'Sector Div {div_id}'
                             ))
 
-                            # Línea B (Roja)
+                            # Línea B (Rojo Intenso)
                             fig.add_trace(go.Scatter(
                                 x=[pf[0], po[0]], y=[pf[1], po[1]], mode='lines+markers',
                                 line=dict(color='#ff2b2b', width=2), name=f'B (Div {div_id})'
                             ))
 
-                            # Línea D (Naranja)
+                            # Línea D (Celeste Cyan)
                             fig.add_trace(go.Scatter(
                                 x=[p_D1[0], p_D2[0]], y=[p_D1[1], p_D2[1]], mode='lines+markers',
-                                line=dict(color='orange', width=2), name=f'D (Div {div_id})'
+                                line=dict(color='#00d2ff', width=3), name=f'D (Div {div_id})'
                             ))
 
                     fig.update_layout(
@@ -172,11 +161,10 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
                 
                 with col2:
-                    st.subheader(f"Métricas Oficiales ({tab_name})")
+                    st.subheader(f"Métricas ({tab_name})")
                     for item in lista_divs:
                         with st.expander(f"📍 Div {item['division']} (Obstáculo: {item['id_obs']})", expanded=True):
                             st.caption(f"Altura obstáculo analizada: {item['h_obs']}m")
                             st.metric("Distancia B (m)", f"{item['B']} m")
                             st.metric("Ancho D (m)", f"{item['D']} m")
                             st.metric("Diferencia Altura A (m)", f"{item['A']} m")
-                            
