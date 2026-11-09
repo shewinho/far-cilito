@@ -7,7 +7,7 @@ import time
 import math
 import numpy as np
 
-st.set_page_config(page_title="FARcilito - CEV", layout="wide")
+st.set_page_config(page_title="FARcilito 360° - CEV", layout="wide")
 st.title("🏠 FARcilito 360°")
 st.caption(f"Motor Geométrico FAR | Múltiples Orientaciones | Reglas: {VERSION_REGLAS}")
 
@@ -50,8 +50,6 @@ with st.sidebar:
         radio_busq = st.number_input("Radio de Búsqueda (m)", value=100.0, step=10.0)
         
         st.markdown("### Ajuste de Alturas (Obstáculos)")
-        st.caption("Modifica la altura de volúmenes complejos si es necesario:")
-        
         h_custom_dict = {}
         with st.expander("Editar Alturas de Obstáculos"):
             for obs in obstaculos:
@@ -95,6 +93,7 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                 with col1:
                     fig = go.Figure()
                     
+                    # 1. Trazado de las capas DXF
                     for ent in st.session_state['entidades']:
                         capa = ent['capa']
                         pts = list(ent['puntos'])
@@ -111,12 +110,14 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                         angulo_normal = lista_divs[0]['angulo_rad_B']
                         radio = res_master['radio']
                         
+                        # Arco
                         theta = np.linspace(angulo_normal - math.pi/2, angulo_normal + math.pi/2, 100)
                         fig.add_trace(go.Scatter(
                             x=pf[0] + radio * np.cos(theta), y=pf[1] + radio * np.sin(theta), mode='lines',
                             line=dict(color='rgba(255,255,255,0.4)', width=1, dash='dash'), name='Radio de Búsqueda'
                         ))
 
+                        # Rayos cada 36°
                         for ang in [-90, -54, -18, 18, 54, 90]:
                             rad = angulo_normal + math.radians(ang)
                             fig.add_trace(go.Scatter(
@@ -126,11 +127,13 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
 
                         limites_cev = {1: (54, 90), 2: (18, 54), 3: (-18, 18), 4: (-54, -18), 5: (-90, -54)}
                         
+                        # DIBUJO DE RESULTADOS B Y D
                         for item in lista_divs:
                             div_id = item['division']
                             po = item['punto_obstaculo']
                             p_D1, p_D2 = item['p_D1'], item['p_D2']
                             
+                            # Sector amarillo
                             lim_inf, lim_sup = limites_cev[div_id]
                             theta_sec = np.linspace(angulo_normal + math.radians(lim_inf), angulo_normal + math.radians(lim_sup), 30)
                             x_sec = np.append(pf[0] + radio * np.cos(theta_sec), pf[0])
@@ -141,20 +144,20 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                                 line=dict(color='yellow', width=1), name=f'Sector Div {div_id}'
                             ))
 
-                            # Línea B (Rojo Intenso)
+                            # Línea B (Roja)
                             fig.add_trace(go.Scatter(
                                 x=[pf[0], po[0]], y=[pf[1], po[1]], mode='lines+markers',
-                                line=dict(color='#ff2b2b', width=2), name=f'B (Div {div_id})'
+                                line=dict(color='#ff2b2b', width=2.5), marker=dict(size=6, color='#ff2b2b'), name=f'B (Div {div_id})'
                             ))
 
-                            # Línea D (Celeste Cyan)
+                            # Línea D (Celeste) - AHORA TRAZA LOS BORDES CORRECTOS
                             fig.add_trace(go.Scatter(
                                 x=[p_D1[0], p_D2[0]], y=[p_D1[1], p_D2[1]], mode='lines+markers',
-                                line=dict(color='#00d2ff', width=3), name=f'D (Div {div_id})'
+                                line=dict(color='#00d2ff', width=3.5), marker=dict(size=6, color='#00d2ff'), name=f'D (Div {div_id})'
                             ))
 
                     fig.update_layout(
-                        title=f"Escaneo de Fachada {tab_name}",
+                        title=f"Visor Geométrico - Fachada {tab_name}",
                         yaxis=dict(scaleanchor="x", scaleratio=1),
                         height=650, template="plotly_dark", margin=dict(l=0, r=0, t=40, b=0)
                     )
