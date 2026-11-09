@@ -19,15 +19,10 @@ class ReglasFAR:
 
     @staticmethod
     def obtener_tramo_fachada(fachada_puntos, obstaculo_puntos=None, orientacion_fija=None):
-        """
-        Calcula el "Punto Medio" de la fachada (Ec. 5 CEV si aplica).
-        Si se pasa una orientacion_fija (ej. 0 para Norte, 90 para Este), usa ese ángulo normal.
-        """
         poly_casa = ReglasFAR.asegurar_poligono(fachada_puntos)
         centro_casa = poly_casa.centroid
 
         if orientacion_fija is not None:
-            # Encontrar el punto más extremo de la casa en esa dirección
             coords = list(poly_casa.exterior.coords)
             mejor_pm = None
             max_proy = -float('inf')
@@ -45,7 +40,6 @@ class ReglasFAR:
                     mejor_pm = pm
             return mejor_pm, math.radians(orientacion_fija)
 
-        # Respaldo por si no se especifica orientación (apuntar a un obstáculo)
         poly_obs = ReglasFAR.asegurar_poligono(obstaculo_puntos)
         centro_obs = poly_obs.centroid
         mejor_pm = poly_casa.exterior.interpolate(poly_casa.exterior.project(centro_obs))
@@ -54,7 +48,6 @@ class ReglasFAR:
 
     @staticmethod
     def construir_sectores_cev(punto_fachada, angulo_normal_rad, radio=500.0):
-        """Crea los 5 conos del semicírculo de 180° a partir del Punto Medio fijo."""
         limites_cev = {1: (54, 90), 2: (18, 54), 3: (-18, 18), 4: (-54, -18), 5: (-90, -54)}
         sectores = {}
         for div, (ang_min, ang_max) in limites_cev.items():
@@ -92,7 +85,6 @@ class ReglasFAR:
             
             best_seg_mid = poly_recorte.centroid
             min_seg_dist = float('inf')
-            
             for j in range(len(coords_ext) - 1):
                 seg = LineString([coords_ext[j], coords_ext[j+1]])
                 if seg.length < 0.01: continue
@@ -110,27 +102,21 @@ class ReglasFAR:
             angulo_b_rad = math.atan2(dy, dx)
 
             angulo_perp = angulo_b_rad + math.pi / 2.0
-            largo = radio_busqueda
-            p1 = Point(punto_obstaculo.x - largo * math.cos(angulo_perp), punto_obstaculo.y - largo * math.sin(angulo_perp))
-            p2 = Point(punto_obstaculo.x + largo * math.cos(angulo_perp), punto_obstaculo.y + largo * math.sin(angulo_perp))
-            linea_perp = LineString([p1, p2])
-
-            inter_d = linea_perp.intersection(poly_recorte)
-            if inter_d.is_empty:
-                ancho_d = 0.0
-                p_D1, p_D2 = punto_obstaculo, punto_obstaculo
-            else:
-                coords_d = []
-                if hasattr(inter_d, 'geoms'):
-                    for g in inter_d.geoms: coords_d.extend(list(g.coords))
-                else:
-                    coords_d = list(inter_d.coords)
-                if len(coords_d) >= 2:
-                    p_D1, p_D2 = Point(coords_d[0]), Point(coords_d[-1])
-                    ancho_d = p_D1.distance(p_D2)
-                else:
-                    p_D1, p_D2 = punto_obstaculo, punto_obstaculo
-                    ancho_d = 0.0
+            nx_perp = math.cos(angulo_perp)
+            ny_perp = math.sin(angulo_perp)
+            
+            min_proy = float('inf')
+            max_proy = -float('inf')
+            
+            for pt in coords_ext:
+                proy = (pt[0] - punto_obstaculo.x) * nx_perp + (pt[1] - punto_obstaculo.y) * ny_perp
+                if proy < min_proy: min_proy = proy
+                if proy > max_proy: max_proy = proy
+                
+            ancho_d = max_proy - min_proy
+            
+            p_d1 = (punto_obstaculo.x + min_proy * nx_perp, punto_obstaculo.y + min_proy * ny_perp)
+            p_d2 = (punto_obstaculo.x + max_proy * nx_perp, punto_obstaculo.y + max_proy * ny_perp)
 
             dif_ang = math.degrees(angulo_b_rad - angulo_normal)
             while dif_ang > 180: dif_ang -= 360
@@ -144,8 +130,8 @@ class ReglasFAR:
                 "angulo": round(-dif_ang, 2),
                 "punto_fachada": (punto_fachada.x, punto_fachada.y),
                 "punto_obstaculo": (punto_obstaculo.x, punto_obstaculo.y),
-                "p_D1": (p_D1.x, p_D1.y),
-                "p_D2": (p_D2.x, p_D2.y),
+                "p_D1": p_d1,
+                "p_D2": p_d2,
                 "angulo_rad_B": angulo_normal,
                 "h_obs": h_obs
             })
@@ -154,43 +140,28 @@ class ReglasFAR:
 
     @staticmethod
     def escanear_entorno(fachada_puntos, lista_obstaculos, h_fachada=1.5, radio_busqueda=500.0):
-        """
-        Escanea las 8 orientaciones (N, NE, E, SE, S, SW, W, NW).
-        Aplica filtro de solapamiento (Fig 38 CEV): descarta obstáculos con menor ángulo de elevación (atan(A/B)).
-        """
         orientaciones = {
             "Norte": 90, "NE": 45, "Este": 0, "SE": -45,
             "Sur": -90, "SO": -135, "Oeste": 180, "NO": 135
         }
-        
         resultados_totales = {}
 
         for nombre_ori, angulo_ori in orientaciones.items():
             divisiones_ori = defaultdict(list)
-            
             for obs in lista_obstaculos:
                 res_obs = ReglasFAR.calcular_parametros_geometricos(
                     fachada_puntos, obs['puntos'], obs['capa'], h_fachada, 
                     orientacion_fija=angulo_ori, radio_busqueda=radio_busqueda, h_custom=obs.get('h_custom')
                 )
                 for div in res_obs:
-                    # Guardamos el ID del obstáculo junto con sus datos
                     div['id_obs'] = obs['handle']
                     divisiones_ori[div['division']].append(div)
             
-            # Aplicar Filtro de Solapamiento (Eclipses) por división
             resultado_filtrado = []
             for div_num, obstrucciones in divisiones_ori.items():
                 if not obstrucciones: continue
-                
-                # Calcular ángulo de elevación para cada obstrucción: atan(A/B)
                 for ob in obstrucciones:
-                    if ob['B'] > 0:
-                        ob['elev_angle'] = math.atan(ob['A'] / ob['B'])
-                    else:
-                        ob['elev_angle'] = math.pi / 2 # 90 grados (encima)
-                
-                # Nos quedamos con la más restrictiva (mayor ángulo de elevación)
+                    ob['elev_angle'] = math.atan(ob['A'] / ob['B']) if ob['B'] > 0 else (math.pi / 2)
                 obs_ganadora = max(obstrucciones, key=lambda x: x['elev_angle'])
                 resultado_filtrado.append(obs_ganadora)
                 
@@ -198,3 +169,4 @@ class ReglasFAR:
                 resultados_totales[nombre_ori] = resultado_filtrado
 
         return resultados_totales
+        
