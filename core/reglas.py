@@ -46,7 +46,6 @@ class ReglasFAR:
             pm = seg.interpolate(0.5, normalized=True)
             dx, dy = p2[0] - p1[0], p2[1] - p1[1]
 
-            # Vector normal hacia afuera de la vivienda
             nx, ny = -dy, dx
             if (nx * (pm.x - centro_casa.x) + ny * (pm.y - centro_casa.y)) < 0:
                 nx, ny = dy, -dx
@@ -66,9 +65,6 @@ class ReglasFAR:
 
     @staticmethod
     def construir_sectores_cev(punto_fachada, angulo_normal_rad, radio=300.0):
-        """
-        Crea las 5 divisiones de 36° del semicírculo CEV (Div 1 a 5 de izq a der mirando desde adentro).
-        """
         limites_cev = {
             1: (54, 90),
             2: (18, 54),
@@ -105,16 +101,31 @@ class ReglasFAR:
             if recorte.is_empty or recorte.area < 0.01:
                 continue
 
-            # Punto medio de la porción del obstáculo dentro de esta división
-            punto_obstaculo = recorte.centroid
+            # CORRECCIÓN CLAVE: Buscar el segmento frontal del obstáculo que mira hacia la fachada
+            poly_recorte = recorte if recorte.geom_type == 'Polygon' else max(recorte.geoms, key=lambda g: g.area)
+            coords_ext = list(poly_recorte.exterior.coords)
+            
+            best_seg_mid = poly_recorte.centroid
+            min_seg_dist = float('inf')
+            
+            for j in range(len(coords_ext) - 1):
+                seg = LineString([coords_ext[j], coords_ext[j+1]])
+                if seg.length < 0.01:
+                    continue
+                pm_seg = seg.interpolate(0.5, normalized=True)
+                d = Point(punto_fachada).distance(pm_seg)
+                if d < min_seg_dist:
+                    min_seg_dist = d
+                    best_seg_mid = (pm_seg.x, pm_seg.y)
+
+            punto_obstaculo = Point(best_seg_mid)
             distancia_b = punto_fachada.distance(punto_obstaculo)
 
-            # Dirección de la línea B
             dx = punto_obstaculo.x - punto_fachada.x
             dy = punto_obstaculo.y - punto_fachada.y
             angulo_b_rad = math.atan2(dy, dx)
 
-            # Línea D: Perpendicular estricta (90°) a la línea B pasando por el punto medio
+            # Línea D: Perpendicular estricta (90°) pasando por el punto medio frontal
             angulo_perp = angulo_b_rad + math.pi / 2.0
             largo = 300.0
             p1 = Point(punto_obstaculo.x - largo * math.cos(angulo_perp),
@@ -123,7 +134,7 @@ class ReglasFAR:
                        punto_obstaculo.y + largo * math.sin(angulo_perp))
             linea_perp = LineString([p1, p2])
 
-            inter_d = linea_perp.intersection(recorte)
+            inter_d = linea_perp.intersection(poly_recorte)
             if inter_d.is_empty:
                 p_D1, p_D2 = punto_obstaculo, punto_obstaculo
                 ancho_d = 0.0
