@@ -1,5 +1,7 @@
-streamlit
-ezdxf
-plotly
+streamlit>=1.35
+ezdxf>=1.1
+plotly>=5.15
 pandas
-shapely
+shapely>=2.0
+numpy
+pytest

@@ -38,7 +38,7 @@ def _relleno_rayado(color):
 def figura_far(entidades: list[dict], objetos: list[dict], res: ResultadoFachada,
                paso: int = 3, division_foco: int | None = None,
                mostrar_omitidas: bool = True, ajustar_vista: bool = True,
-               mostrar_rotulos: bool = True) -> go.Figure:
+               mostrar_rotulos: bool = True, mostrar_recuadros: bool = True) -> go.Figure:
     """objetos: [{'id','nombre','puntos','rol'}] con rol in {'vivienda','obstruccion','excluido'}."""
     fig = go.Figure()
     f = res.fachada
@@ -108,7 +108,7 @@ def figura_far(entidades: list[dict], objetos: list[dict], res: ResultadoFachada
         fig.add_annotation(x=t[0], y=t[1], text="36°", showarrow=False, font=dict(size=10))
 
     # ---- PASO 2: rótulos de división
-    divs_con_recuadro = set() if paso < 3 else ({division_foco} if division_foco else set(range(1, N_DIVISIONES + 1)))
+    divs_con_recuadro = set() if (paso < 3 or not mostrar_recuadros) else ({division_foco} if division_foco else set(range(1, N_DIVISIONES + 1)))
     if paso >= 2:
         for k in range(1, N_DIVISIONES + 1):
             if k in divs_con_recuadro:
@@ -155,7 +155,7 @@ def figura_far(entidades: list[dict], objetos: list[dict], res: ResultadoFachada
         por_div: dict[int, list] = {}
         for t in visibles:
             por_div.setdefault(t.division, []).append(t)
-        divs_a_rotular = [division_foco] if division_foco else range(1, N_DIVISIONES + 1)
+        divs_a_rotular = [] if not mostrar_recuadros else ([division_foco] if division_foco else range(1, N_DIVISIONES + 1))
         for k in divs_a_rotular:
             a0, a1 = limites_division(k)
             lineas = [f"<b>División {k}</b>"]

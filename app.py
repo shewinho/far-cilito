@@ -220,12 +220,15 @@ for k_f, (res, tab) in enumerate(zip(resultados, tabs[1:])):
     f = res.fachada
     with tab:
         st.subheader(f"{f.nombre} · {f.orientacion} · azimut del eje ortogonal {f.azimut_real:.0f}°")
-        c1, c2, c3 = st.columns([2.2, 1.2, 1.6])
+        c1, c2, c3 = st.columns([2.2, 1.2, 2.0])
         paso = c1.radio("Lámina del ejercicio", [1, 2, 3], index=2, horizontal=True, key=f"paso_{k_f}",
                         format_func=lambda p: {1: "Paso 1 · Trazar divisiones", 2: "Paso 2 · Identificar divisiones", 3: "Paso 3 · Obstrucciones, B, D y A"}[p])
         foco = c2.selectbox("División", [0, 1, 2, 3, 4, 5], key=f"foco_{k_f}", format_func=lambda k: "Todas" if k == 0 else f"División {k}")
         ajustar = c3.checkbox("Ajustar vista al semicírculo", value=True, key=f"ajuste_{k_f}")
-        fig = figura_far(entidades, objs_dibujo, res, paso=paso, division_foco=foco or None, ajustar_vista=ajustar)
+        recuadros = c3.checkbox("Recuadros por división", value=True, key=f"recuadros_{k_f}",
+                                help="Apágalos si tapan obstrucciones; los mismos datos están en la tabla de abajo.")
+        fig = figura_far(entidades, objs_dibujo, res, paso=paso, division_foco=foco or None, ajustar_vista=ajustar,
+                         mostrar_recuadros=recuadros)
         mostrar(fig, config={"displayModeBar": True, "scrollZoom": True,
                              "toImageButtonOptions": {"format": "png", "filename": f"FAR_{f.nombre}", "scale": 2}}, key=f"fig_{k_f}")
         st.caption("Semicírculo con base en el punto medio de la fachada y orientado por su eje ortogonal (fijo para todas las obstrucciones). "

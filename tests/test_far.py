@@ -95,3 +95,11 @@ def test_contorno_formado_por_lineas_sueltas():
         doc.saveas(t.name)
     objs = ImportadorDXF(t.name).extraer_objetos()
     assert len(objs) == 1 and objs[0]["altura_capa"] == 6.0 and abs(__import__("shapely.geometry", fromlist=["Polygon"]).Polygon(objs[0]["puntos"]).area - 16) < 1e-9
+
+
+def test_modo_360_una_fachada_por_arista():
+    from core.far import fachadas_de_vivienda
+    viv = next(o for o in ImportadorDXF(str(DXF)).extraer_objetos() if o["capa"] == "VIVIENDA")
+    fs = fachadas_de_vivienda(viv["puntos"])
+    assert [round(f.azimut_real) for f in fs] == [0, 90, 180, 270]
+    assert [f.orientacion for f in fs] == ["Norte", "Este", "Sur", "Oeste"]
