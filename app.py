@@ -179,3 +179,4 @@ if 'entidades' in st.session_state and st.session_state['resultados_360'] is not
                             st.metric("Distancia B (m)", f"{item['B']} m")
                             st.metric("Ancho D (m)", f"{item['D']} m")
                             st.metric("Diferencia Altura A (m)", f"{item['A']} m")
+                            
