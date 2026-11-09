@@ -8,14 +8,14 @@ import math
 import numpy as np
 
 st.set_page_config(page_title="FARcilito - CEV", layout="wide")
-st.title("🏠 FARcilito")
-st.caption(f"Herramienta Asistida FAR - CEV | Reglas: {VERSION_REGLAS}")
+st.title("🏠 FARcilito 360°")
+st.caption(f"Motor Geométrico FAR | Múltiples Orientaciones | Reglas: {VERSION_REGLAS}")
 
-if 'resultado_abd' not in st.session_state:
-    st.session_state['resultado_abd'] = None
+if 'resultados_360' not in st.session_state:
+    st.session_state['resultados_360'] = None
 
 with st.sidebar:
-    st.header("1. Importar Geometría")
+    st.header("1. Carga de Geometría")
     archivo_dxf = st.file_uploader("Sube un archivo DXF", type=["dxf"])
     
     if archivo_dxf is not None:
@@ -24,194 +24,158 @@ with st.sidebar:
         try:
             importador = ImportadorDXF("temp.dxf")
             entidades = importador.extraer_geometria()
-            st.success(f"DXF cargado: {len(entidades)} entidades.")
             st.session_state['entidades'] = entidades
+            st.success(f"DXF cargado: {len(entidades)} polígonos.")
         except Exception as e:
             st.error(f"Error al leer DXF: {e}")
 
     st.markdown("---")
     
     if 'entidades' in st.session_state:
-        st.header("2. Revisión de Parámetros")
-        handles = {f"{e['handle']} ({e['capa']})": e for e in st.session_state['entidades']}
-        opciones_keys = list(handles.keys())
+        st.header("2. Parámetros Globales")
+        entidades = st.session_state['entidades']
         
-        fachada_key = st.selectbox("Selecciona la Vivienda / Fachada", opciones_keys)
-        obstaculo_key = st.selectbox("Selecciona la Obstrucción", opciones_keys)
-        h_fachada = st.number_input("Altura punto medio fachada (m)", value=1.5, step=0.1)
+        # Filtros automáticos: Casas vs Obstáculos
+        casas = [e for e in entidades if 'VIVIENDA' in e['capa'].upper()]
+        obstaculos = [e for e in entidades if 'VIVIENDA' not in e['capa'].upper()]
         
-        if st.button("Calcular A, B y D", use_container_width=True):
-            with st.spinner("Calculando intersecciones y divisiones según norma MINVU..."):
-                time.sleep(0.3)
-                fachada = handles[fachada_key]
-                obstaculo = handles[obstaculo_key]
-                
-                params = ReglasFAR.calcular_parametros_geometricos(
-                    fachada['puntos'], obstaculo['puntos'], obstaculo['capa'], h_fachada
-                )
-                
-                params['fachada_puntos'] = fachada['puntos']
-                params['obstaculo_puntos'] = obstaculo['puntos']
-                params['fachada_id'] = fachada['handle']
-                params['obstruccion_id'] = obstaculo['handle']
-                params['capa'] = obstaculo['capa']
-                
-                st.session_state['resultado_abd'] = params
-                st.success("¡Cálculo completado!")
-
-if 'entidades' in st.session_state:
-    entidades = st.session_state['entidades']
-    
-    col1, col2 = st.columns([2.3, 1.2])
-    
-    with col1:
-        st.subheader("Visor Geométrico con Semicírculo FAR (MINVU)")
-        fig = go.Figure()
-        
-        # 1. Dibujar DXF por capas
-        capas = {}
-        for ent in entidades:
-            capa = ent['capa']
-            if capa not in capas:
-                capas[capa] = {'x': [], 'y': []}
-            pts = list(ent['puntos'])
-            if ent['tipo'] == 'polilinea' and len(pts) >= 3 and pts[0] != pts[-1]:
-                pts.append(pts[0])
-            capas[capa]['x'].extend([p[0] for p in pts] + [None])
-            capas[capa]['y'].extend([p[1] for p in pts] + [None])
-
-        for capa, datos in capas.items():
-            color = 'deepskyblue' if 'VIVIENDA' in capa.upper() else 'gray'
-            if 'EDIFICIO' in capa.upper() or 'ELEMENTO' in capa.upper():
-                color = '#ff4b4b'
-            elif 'MURO' in capa.upper():
-                color = 'cyan'
-            fig.add_trace(go.Scatter(
-                x=datos['x'], y=datos['y'], mode='lines',
-                line=dict(color=color, width=1.5), name=f"Capa: {capa}"
-            ))
-        
-        # 2. Dibujar Semicírculo FAR y Divisiones
-        res = st.session_state.get('resultado_abd')
-        if res is not None and 'angulo_rad_B' in res:
-            pf = res['punto_fachada']
-            angulo_normal = res['angulo_rad_B']
-            lista_divs = res.get('divisiones_lista', [res])
+        if not casas:
+            st.warning("No se encontró capa 'VIVIENDA' en el DXF.")
+            fachadas_disp = {f"{e['handle']} ({e['capa']})": e for e in entidades}
+        else:
+            fachadas_disp = {f"{e['handle']} ({e['capa']})": e for e in casas}
             
-            max_b = max([d['B'] for d in lista_divs]) if lista_divs else res['B']
-            radio = max(max_b * 1.25, 25)
-            
-            # Arco de 180° fijo a la fachada
-            theta = np.linspace(angulo_normal - math.pi/2, angulo_normal + math.pi/2, 100)
-            x_arco = pf[0] + radio * np.cos(theta)
-            y_arco = pf[1] + radio * np.sin(theta)
-            fig.add_trace(go.Scatter(
-                x=x_arco, y=y_arco, mode='lines',
-                line=dict(color='rgba(255,255,255,0.6)', width=2), name='Semicírculo 180°'
-            ))
-
-            # Rayos cada 36°
-            angulos_div = [-90, -54, -18, 18, 54, 90]
-            for ang in angulos_div:
-                rad = angulo_normal + math.radians(ang)
-                fig.add_trace(go.Scatter(
-                    x=[pf[0], pf[0] + radio * math.cos(rad)],
-                    y=[pf[1], pf[1] + radio * math.sin(rad)],
-                    mode='lines', line=dict(color='rgba(255,255,255,0.35)', width=1, dash='dot'),
-                    showlegend=False
-                ))
-
-            # Etiquetas División 1 a 5 (De izquierda a derecha mirando desde adentro: +72° a -72°)
-            centros_cev = {1: 72, 2: 36, 3: 0, 4: -36, 5: -72}
-            for div_num, ang_centro in centros_cev.items():
-                rad = angulo_normal + math.radians(ang_centro)
-                x_txt = pf[0] + (radio * 0.88) * math.cos(rad)
-                y_txt = pf[1] + (radio * 0.88) * math.sin(rad)
-                fig.add_annotation(
-                    x=x_txt, y=y_txt, text=f"Div {div_num}",
-                    showarrow=False, font=dict(color="white", size=12),
-                    bgcolor="rgba(0,0,0,0.6)", borderpad=3
-                )
-
-            # Dibujar B y D para cada división afectada por el obstáculo
-            limites_cev = {1: (54, 90), 2: (18, 54), 3: (-18, 18), 4: (-54, -18), 5: (-90, -54)}
-            for item in lista_divs:
-                div_id = item['division']
-                lim_inf, lim_sup = limites_cev[div_id]
-                theta_sec = np.linspace(angulo_normal + math.radians(lim_inf), angulo_normal + math.radians(lim_sup), 40)
-                x_sec = np.append(pf[0] + radio * np.cos(theta_sec), pf[0])
-                y_sec = np.append(pf[1] + radio * np.sin(theta_sec), pf[1])
-                
-                fig.add_trace(go.Scatter(
-                    x=x_sec, y=y_sec, fill='toself',
-                    fillcolor='rgba(255, 230, 0, 0.18)',
-                    line=dict(color='yellow', width=1.5),
-                    name=f'Sector Div {div_id}'
-                ))
-
-                po = item['punto_obstaculo']
-                p_D1, p_D2 = item['p_D1'], item['p_D2']
-
-                # Línea B
-                fig.add_trace(go.Scatter(
-                    x=[pf[0], po[0]], y=[pf[1], po[1]], mode='lines+markers',
-                    line=dict(color='#ff2b2b', width=3),
-                    marker=dict(size=7, color='#ff2b2b'),
-                    name=f'B (Div {div_id})'
-                ))
-                fig.add_annotation(
-                    x=(pf[0]+po[0])/2, y=(pf[1]+po[1])/2,
-                    text=f"B: {item['B']}m", showarrow=False,
-                    font=dict(color="white", size=12), bgcolor="#c91c1c", borderpad=3
-                )
-
-                # Línea D
-                fig.add_trace(go.Scatter(
-                    x=[p_D1[0], p_D2[0]], y=[p_D1[1], p_D2[1]], mode='lines+markers',
-                    line=dict(color='orange', width=3),
-                    marker=dict(size=6, color='orange'),
-                    name=f'D (Div {div_id})'
-                ))
-                fig.add_annotation(
-                    x=(p_D1[0]+p_D2[0])/2, y=(p_D1[1]+p_D2[1])/2,
-                    text=f"D: {item['D']}m", showarrow=False,
-                    font=dict(color="black", size=12), bgcolor="orange", borderpad=3
-                )
-
-        fig.update_layout(
-            title="Planta 2D - Divisiones CEV",
-            yaxis=dict(scaleanchor="x", scaleratio=1),
-            height=700, template="plotly_dark",
-            margin=dict(l=0, r=0, t=50, b=0)
-        )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
+        fachada_key = st.selectbox("Selecciona la Vivienda", list(fachadas_disp.keys()))
         
-    with col2:
-        st.subheader("Resultados por División")
-        res = st.session_state.get('resultado_abd')
-        if res is not None and 'angulo_rad_B' in res:
-            lista_divs = res.get('divisiones_lista', [res])
-            if not lista_divs:
-                st.warning("El obstáculo seleccionado está fuera del campo visual (180°) de esta fachada.")
-            else:
-                st.success(f"El obstáculo intersecta **{len(lista_divs)}** división(es).")
-                for idx, item in enumerate(lista_divs):
-                    with st.expander(f"📍 División {item['division']} (B={item['B']}m | D={item['D']}m)", expanded=True):
-                        st.metric("Distancia B (m)", f"{item['B']} m")
-                        st.metric("Ancho D (m)", f"{item['D']} m")
-                        st.metric("Diferencia Altura A (m)", f"{item['A']} m")
+        h_fachada = st.number_input("Altura P. Medio Fachada (m)", value=1.5, step=0.1)
+        radio_busq = st.number_input("Radio de Búsqueda (m)", value=100.0, step=10.0)
+        
+        st.markdown("### Ajuste de Alturas (Obstáculos)")
+        st.caption("Modifica la altura de volúmenes complejos si es necesario:")
+        
+        # Diccionario para inyectar alturas customizadas antes de procesar
+        h_custom_dict = {}
+        with st.expander("Editar Alturas de Obstáculos"):
+            for obs in obstaculos:
+                h_def = 15.0 if "EDIFICIO" in obs['capa'].upper() else 3.0
+                h_val = st.number_input(f"{obs['handle']} ({obs['capa']})", value=h_def, key=f"h_{obs['handle']}")
+                h_custom_dict[obs['handle']] = h_val
+        
+        if st.button("Escanear Entorno (8 Orientaciones)", use_container_width=True):
+            with st.spinner("Analizando conos CEV y descartando solapamientos..."):
+                time.sleep(0.5)
+                fachada = fachadas_disp[fachada_key]
                 
-                export_data = {
-                    "version_reglas": VERSION_REGLAS,
-                    "fachada_id": res['fachada_id'],
-                    "obstruccion_id": res['obstruccion_id'],
-                    "capa": res['capa'],
-                    "divisiones": lista_divs
+                # Inyectamos las alturas custom a la lista de obstáculos
+                for obs in obstaculos:
+                    obs['h_custom'] = h_custom_dict.get(obs['handle'])
+                
+                res_360 = ReglasFAR.escanear_entorno(fachada['puntos'], obstaculos, h_fachada, radio_busqueda=radio_busq)
+                
+                st.session_state['resultados_360'] = {
+                    'datos': res_360,
+                    'fachada_activa': fachada['puntos'],
+                    'fachada_id': fachada['handle'],
+                    'radio': radio_busq
                 }
-                st.download_button(
-                    label="📥 Descargar JSON CEV",
-                    data=json.dumps(export_data, indent=2),
-                    file_name=f"reporte_far_{res['obstruccion_id']}.json",
-                    mime="application/json",
-                    use_container_width=True
-                )
+                st.success("¡Escaneo CEV completado!")
+
+if 'entidades' in st.session_state and st.session_state['resultados_360'] is not None:
+    res_master = st.session_state['resultados_360']
+    datos_ori = res_master['datos']
+    
+    # Pestañas para cada orientación encontrada
+    orientaciones_detectadas = list(datos_ori.keys())
+    
+    if not orientaciones_detectadas:
+        st.info("No se detectaron obstáculos dentro del radio de búsqueda para ninguna orientación.")
+    else:
+        tabs = st.tabs(orientaciones_detectadas)
+        
+        for idx, tab_name in enumerate(orientaciones_detectadas):
+            with tabs[idx]:
+                col1, col2 = st.columns([2.5, 1.2])
+                
+                lista_divs = datos_ori[tab_name]
+                
+                with col1:
+                    fig = go.Figure()
+                    
+                    # 1. Dibujar Capas (Fondo)
+                    for ent in st.session_state['entidades']:
+                        capa = ent['capa']
+                        pts = list(ent['puntos'])
+                        if len(pts) >= 3 and pts[0] != pts[-1]: pts.append(pts[0])
+                        color = 'rgba(0, 191, 255, 0.4)' if 'VIVIENDA' in capa.upper() else 'rgba(128, 128, 128, 0.3)'
+                        if 'EDIFICIO' in capa.upper() or 'ELEMENTO' in capa.upper(): color = 'rgba(255, 75, 75, 0.3)'
+                        fig.add_trace(go.Scatter(
+                            x=[p[0] for p in pts], y=[p[1] for p in pts], mode='lines',
+                            line=dict(color=color, width=1), showlegend=False, hoverinfo='skip'
+                        ))
+
+                    if lista_divs:
+                        pf = lista_divs[0]['punto_fachada']
+                        angulo_normal = lista_divs[0]['angulo_rad_B']
+                        radio = res_master['radio']
+                        
+                        # Arco de búsqueda
+                        theta = np.linspace(angulo_normal - math.pi/2, angulo_normal + math.pi/2, 100)
+                        fig.add_trace(go.Scatter(
+                            x=pf[0] + radio * np.cos(theta), y=pf[1] + radio * np.sin(theta), mode='lines',
+                            line=dict(color='rgba(255,255,255,0.4)', width=1, dash='dash'), name='Radio de Búsqueda'
+                        ))
+
+                        # Rayos divisorios
+                        for ang in [-90, -54, -18, 18, 54, 90]:
+                            rad = angulo_normal + math.radians(ang)
+                            fig.add_trace(go.Scatter(
+                                x=[pf[0], pf[0] + radio * math.cos(rad)], y=[pf[1], pf[1] + radio * np.sin(rad)],
+                                mode='lines', line=dict(color='rgba(255,255,255,0.2)', width=1), showlegend=False
+                            ))
+
+                        limites_cev = {1: (54, 90), 2: (18, 54), 3: (-18, 18), 4: (-54, -18), 5: (-90, -54)}
+                        
+                        # Dibujar B y D por cada división ganadora
+                        for item in lista_divs:
+                            div_id = item['division']
+                            po = item['punto_obstaculo']
+                            p_D1, p_D2 = item['p_D1'], item['p_D2']
+                            
+                            # Relleno del sector
+                            lim_inf, lim_sup = limites_cev[div_id]
+                            theta_sec = np.linspace(angulo_normal + math.radians(lim_inf), angulo_normal + math.radians(lim_sup), 30)
+                            x_sec = np.append(pf[0] + radio * np.cos(theta_sec), pf[0])
+                            y_sec = np.append(pf[1] + radio * np.sin(theta_sec), pf[1])
+                            
+                            fig.add_trace(go.Scatter(
+                                x=x_sec, y=y_sec, fill='toself', fillcolor='rgba(255, 230, 0, 0.1)',
+                                line=dict(color='yellow', width=1), name=f'Div {div_id} ({item["id_obs"]})'
+                            ))
+
+                            # Línea B (Roja)
+                            fig.add_trace(go.Scatter(
+                                x=[pf[0], po[0]], y=[pf[1], po[1]], mode='lines+markers',
+                                line=dict(color='#ff2b2b', width=2), name=f'B (Div {div_id})'
+                            ))
+
+                            # Línea D (Naranja)
+                            fig.add_trace(go.Scatter(
+                                x=[p_D1[0], p_D2[0]], y=[p_D1[1], p_D2[1]], mode='lines+markers',
+                                line=dict(color='orange', width=2), name=f'D (Div {div_id})'
+                            ))
+
+                    fig.update_layout(
+                        title=f"Escaneo de Fachada {tab_name}",
+                        yaxis=dict(scaleanchor="x", scaleratio=1),
+                        height=650, template="plotly_dark", margin=dict(l=0, r=0, t=40, b=0)
+                    )
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
+                
+                with col2:
+                    st.subheader(f"Métricas Oficiales ({tab_name})")
+                    for item in lista_divs:
+                        with st.expander(f"📍 Div {item['division']} (Obstáculo: {item['id_obs']})", expanded=True):
+                            st.caption(f"Altura obstáculo analizada: {item['h_obs']}m")
+                            st.metric("Distancia B (m)", f"{item['B']} m")
+                            st.metric("Ancho D (m)", f"{item['D']} m")
+                            st.metric("Diferencia Altura A (m)", f"{item['A']} m")
