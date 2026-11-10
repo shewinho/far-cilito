@@ -103,3 +103,41 @@ def test_modo_360_una_fachada_por_arista():
     fs = fachadas_de_vivienda(viv["puntos"])
     assert [round(f.azimut_real) for f in fs] == [0, 90, 180, 270]
     assert [f.orientacion for f in fs] == ["Norte", "Este", "Sur", "Oeste"]
+
+
+def test_A_usa_cotas_absolutas_de_terreno():
+    f, obs = cargar()
+    base = {t.nombre: t.A for t in calcular_fachada(f, obs, 1.5).tramos if t.division in (2, 4)}
+    # Edificio B sobre terreno 2 m más alto: cota techo = 2 + 13 = 15 (igual que antes con 15 desde 0)
+    for o in obs:
+        if o.nombre == "Edificio B":
+            o.altura, o.altura_propia, o.cota_terreno = 15.0, 13.0, 2.0
+    # punto medio a cota 1 + 1,5 = 2,5 -> A = 15 - 2,5
+    r = calcular_fachada(f, obs, 2.5)
+    eb = next(t for t in r.tramos if t.nombre == "Edificio B")
+    assert abs(eb.A - 12.5) < 1e-9 and eb.cota_terreno == 2.0 and eb.altura_propia == 13.0
+    assert abs(base["Edificio B"] - 13.5) < 1e-9
+
+
+def test_seleccion_por_clic():
+    from core.seleccion import actualizar_seleccion, ids_desde_evento
+    assert actualizar_seleccion("obstruccion", ["a", "b"], "v", ["a"], 0) == ("v", ["b"], 0)           # a se quita, b se agrega
+    assert actualizar_seleccion("obstruccion", ["v"], "v", [], 0)[1] == []                             # la vivienda no es obstrucción
+    assert actualizar_seleccion("vivienda", ["a"], "v", ["a", "b"], 0) == ("a", ["b"], 0)              # a pasa a ser la vivienda
+    assert actualizar_seleccion("fachada", ["ARISTA:2"], "v", [], 0)[2] == 2
+    assert actualizar_seleccion("obstruccion", ["ARISTA:2"], "v", ["a"], 0)[2] == 0                    # fuera del modo fachada se ignora
+    ev = {"selection": {"points": [{"customdata": ["x1"]}, {"customdata": "x2"}, {"customdata": ["x1"]}]}}
+    assert ids_desde_evento(ev) == ["x1", "x2"] and ids_desde_evento(None) == []
+
+
+def test_alzado_centro_y_altura_promedio():
+    from core.alzado import centro_alzado, altura_promedio
+    cuerpos = {"A": [(0, 0), (8, 0), (8, 2.4), (0, 2.4)], "B": [(2, 2.4), (6, 2.4), (6, 5.0), (2, 5.0)],
+               "Alero": [(8, 1), (9, 1), (9, 1.1), (8, 1.1)]}
+    c = centro_alzado(cuerpos, {"Alero"})
+    assert (c["ancho"], c["alto"], c["x_centro"], c["z_centro"]) == (8, 5.0, 4.0, 2.5)
+    assert centro_alzado(cuerpos, set(cuerpos)) is None
+    # casa de techo a dos aguas: el área sobre 1,5 m es 45 + 15 = 60 m² y la base 10 m -> A promedio 6 m
+    i = altura_promedio([(0, 0), (10, 0), (10, 6), (5, 9), (0, 6)], 1.5)
+    assert abs(i["area_sobre"] - 60) < 1e-9 and abs(i["A_promedio"] - 6) < 1e-9
+    assert altura_promedio([(0, 0), (4, 0), (4, 1), (0, 1)], 1.5)["area_sobre"] == 0

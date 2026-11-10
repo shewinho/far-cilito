@@ -11,6 +11,12 @@ streamlit run app.py
 ```
 Botón «Cargar ejemplo del manual» para ver el ejercicio de acreditación (`data/ejemplo_manual.dxf`).
 
+## Flujo
+1. Sube un DXF (o carga el ejemplo).
+2. Pestaña **Plano y selección**: haz clic para elegir la vivienda, las obstrucciones y la fachada; completa la altura del edificio y la cota del terreno de cada obstrucción.
+3. Pestaña **Alzado e irregulares**: centro de una fachada irregular (alzado regular, cuerpos ingresados o DXF de alzado, `data/ejemplo_alzado.dxf`) y altura promedio de obstáculos irregulares.
+4. Una pestaña por fachada con las láminas del ejercicio; **Resumen y exportar** entrega JSON y CSV (sección 11.8).
+
 ## Convenciones del DXF
 - Norte = +Y (usa «Rotación del Norte» si el plano está girado).
 - La vivienda y las obstrucciones son contornos cerrados (polilíneas cerradas o líneas que formen un contorno).

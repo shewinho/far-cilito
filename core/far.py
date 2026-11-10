@@ -156,7 +156,9 @@ class Obstruccion:
     nombre: str
     capa: str
     puntos: list
-    altura: float                     # altura total sobre el terreno natural (m); si es variable, la promedio
+    altura: float                     # cota ABSOLUTA del techo de la obstrucción (cota terreno + altura propia); si es variable, la promedio
+    altura_propia: float | None = None   # altura del edificio sobre su propio terreno (informativa)
+    cota_terreno: float = 0.0            # cota del terreno al pie de la obstrucción (informativa)
 
 
 @dataclass
@@ -168,7 +170,7 @@ class Tramo:
     A: float
     B: float
     D: float
-    altura_obstruccion: float
+    altura_obstruccion: float         # cota absoluta del techo
     angulo_elevacion: float           # grados sobre la horizontal del punto medio
     angulo_b: float                   # ángulo relativo al eje de la fachada (-90..90)
     punto_b: tuple
@@ -179,6 +181,8 @@ class Tramo:
     phi_fin: float
     estado: str = "considerada"       # considerada | desestimable | omitida
     notas: list = field(default_factory=list)
+    altura_propia: float | None = None
+    cota_terreno: float = 0.0
 
     @property
     def B_sobre_D(self):
@@ -237,7 +241,7 @@ def _tramos_continuos(mask):
 
 
 def calcular_fachada(fachada: Fachada, obstrucciones: list[Obstruccion],
-                     altura_punto_medio: float = ALTURA_PUNTO_MEDIO_DEFECTO,
+                     altura_punto_medio: float = ALTURA_PUNTO_MEDIO_DEFECTO,   # cota ABSOLUTA del punto medio de la fachada
                      criterio_desestimacion: str = "ninguno",
                      paso: float = PASO_ANGULAR) -> ResultadoFachada:
     """criterio_desestimacion: 'ninguno' | 'literal' (B/D<0,1 o B/A<0,1) | 'invertido' (D/B<0,1 o A/B<0,1)."""
@@ -343,7 +347,8 @@ def calcular_fachada(fachada: Fachada, obstrucciones: list[Obstruccion],
                         angulo_b=float(_rel(azimut(*Bv), fachada.azimut_normal)),
                         punto_b=(float(pb[0]), float(pb[1])), p_d1=(float(d1[0]), float(d1[1])), p_d2=(float(d2[0]), float(d2[1])),
                         cara_visible=[(float(x), float(y)) for x, y in pts[:: max(1, len(pts) // 60)]] + [(float(pts[-1][0]), float(pts[-1][1]))],
-                        phi_ini=float(phis[a]), phi_fin=float(phis[b]), notas=notas)
+                        phi_ini=float(phis[a]), phi_fin=float(phis[b]), notas=notas,
+                        altura_propia=o.altura_propia, cota_terreno=o.cota_terreno)
                     if criterio_desestimacion == "literal" and (tr.B_sobre_D < UMBRAL_DESESTIMAR or tr.B_sobre_A < UMBRAL_DESESTIMAR):
                         tr.estado = "desestimable"
                     elif criterio_desestimacion == "invertido" and (tr.D_sobre_B < UMBRAL_DESESTIMAR or tr.A_sobre_B < UMBRAL_DESESTIMAR):
