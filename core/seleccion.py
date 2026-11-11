@@ -64,7 +64,7 @@ def actualizar_seleccion(modo: str, clics: list[str], vivienda_id: str | None, o
 
 
 def figura_seleccion(entidades, objetos, vivienda_id, obstruccion_ids, aristas=None, arista_sel=None,
-                     titulo="Haz clic sobre el plano", altura=640) -> go.Figure:
+                     titulo="Haz clic sobre el plano", altura=640, foco_id=None, sin_altura=None) -> go.Figure:
     """objetos: [{'id','nombre','puntos','capa'}]. Marcadores clicables en el contorno y el centro de cada objeto."""
     fig = go.Figure()
     ids_obj = {o["id"] for o in objetos}
@@ -77,26 +77,35 @@ def figura_seleccion(entidades, objetos, vivienda_id, obstruccion_ids, aristas=N
     if xs:
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(color="#b8bcc2", width=1, dash="dashdot"),
                                  hoverinfo="skip", showlegend=False))
+    sin_altura = sin_altura or set()
     mx, my, mid, mtxt = [], [], [], []
     for o in objetos:
         es_viv = o["id"] == vivienda_id
         es_obs = o["id"] in obstruccion_ids
-        color = "#0f69b4" if es_viv else ("#d9363e" if es_obs else "#9aa0a6")
+        falta = es_obs and o["id"] in sin_altura
+        color = "#0f69b4" if es_viv else (("#f08c00" if falta else "#d9363e") if es_obs else "#9aa0a6")
         rotulo = o.get("nombre") or o["id"]
         pts = list(o["puntos"]) + [o["puntos"][0]]
         fig.add_trace(go.Scatter(
             x=[p[0] for p in pts], y=[p[1] for p in pts], mode="lines", line=dict(color=color, width=2.5 if (es_viv or es_obs) else 1),
-            fill="toself", fillcolor={"#0f69b4": "rgba(15,105,180,0.20)", "#d9363e": "rgba(217,54,62,0.18)"}.get(color, "rgba(150,150,150,0.10)"),
+            fill="toself", fillcolor={"#0f69b4": "rgba(15,105,180,0.20)", "#d9363e": "rgba(217,54,62,0.18)",
+                       "#f08c00": "rgba(240,140,0,0.25)"}.get(color, "rgba(150,150,150,0.10)"),
             hoverinfo="skip", showlegend=False))
         c = Polygon(o["puntos"]).representative_point()
-        etiqueta = "Vivienda" if es_viv else ("Obstrucción" if es_obs else "sin usar")
+        etiqueta = "Vivienda" if es_viv else (("⚠ falta altura" if falta else "Obstrucción") if es_obs else "sin usar")
         texto = "<b>Vivienda evaluada</b>" if es_viv else f"<b>{rotulo}</b><br><i>{etiqueta}</i>"
         fig.add_annotation(x=c.x, y=c.y, text=texto, showarrow=False, font=dict(size=9, color="#222"),
                            bgcolor="rgba(255,255,255,0.75)", borderpad=1)
         for p in densificar(o["puntos"]) + [(c.x, c.y)]:
             mx.append(p[0]); my.append(p[1]); mid.append(o["id"]); mtxt.append(f"{rotulo} · {etiqueta}")
+    if foco_id:
+        of = next((o for o in objetos if o["id"] == foco_id), None)
+        if of:
+            pf = list(of["puntos"]) + [of["puntos"][0]]
+            fig.add_trace(go.Scatter(x=[p[0] for p in pf], y=[p[1] for p in pf], mode="lines",
+                                     line=dict(color="#f2c500", width=6), hoverinfo="skip", showlegend=False))
     fig.add_trace(go.Scatter(x=mx, y=my, mode="markers", customdata=mid, text=mtxt,
-                             marker=dict(size=14, color="rgba(0,0,0,0.01)"), hovertemplate="%{text}<br>clic para elegir<extra></extra>",
+                             marker=dict(size=14, color="rgba(0,0,0,0.01)"), hovertemplate="%{text}<br>clic para editar<extra></extra>",
                              selected=dict(marker=dict(opacity=0.01)), unselected=dict(marker=dict(opacity=0.01)),
                              showlegend=False, name="objetos"))
     if aristas:

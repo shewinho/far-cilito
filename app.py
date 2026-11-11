@@ -118,6 +118,8 @@ if ss.get("plano_id") != plano_id:
     ss.mapa_v = 0
     ss.alz_incl = None
     ss.alz_v = 0
+    ss.foco_id = None
+    ss.alt_v = 0
 
 
 def dato(oid):
@@ -222,77 +224,110 @@ def cota_punto_medio(f):
 # =============================================================== pestañas
 titulos = ["🖱️ Plano y selección", "📐 Alzado e irregulares", "📋 Resumen y exportar"] + \
           [(f"{f.orientacion} {f.azimut_real:.0f}°" if not calculo_360 else f"{f.nombre} ({f.azimut_real:.0f}°)") for f in fachadas]
+ph_avisos = st.empty()
 tabs = st.tabs(titulos)
 
 # ------------------------------------------------------------ plano y selección
+def _falta_altura():
+    return {i for i in ss.obs_ids if pd.isna(dato(i)["altura"])}
+
+
 with tabs[0]:
-    c1, c2 = st.columns([3, 1.3])
+    st.info("**Cómo se usa:**  ① haz clic en un edificio del plano  →  ② a la derecha aparece su **ficha**: dile si es la vivienda, "
+            "una obstrucción o si no se usa, y escribe su altura y el nivel del terreno  →  ③ cuando no queden edificios naranjas, "
+            "mira los resultados en las pestañas de las fachadas.", icon="👆")
+    c1, c2 = st.columns([2.6, 1.4])
+
+    # ---- la ficha se dibuja primero para que el plano refleje los cambios al instante
     with c2:
-        modo_clic = st.radio("Con cada clic eliges…", ["Vivienda evaluada", "Obstrucciones", "Fachada (arista)"],
-                             index=1,
-                             help="Vivienda: el clic define cuál es la vivienda. Obstrucciones: cada clic agrega o quita un contorno. "
-                                  "Fachada: clic en un rombo del centro de una arista de la vivienda.")
-        modo_key = {"Vivienda evaluada": "vivienda", "Obstrucciones": "obstruccion", "Fachada (arista)": "fachada"}[modo_clic]
-        b1, b2 = st.columns(2)
-        if b1.button("Todas"):
-            ss.obs_ids = [o["id"] for o in objetos if o["id"] != ss.vivienda_id]
-            ss.mapa_v += 1
-            st.rerun()
-        if b2.button("Ninguna"):
-            ss.obs_ids = []
-            ss.mapa_v += 1
-            st.rerun()
-        st.caption("Azul = vivienda · rojo = obstrucción · gris = no usado · rombo naranja = fachada elegida.")
-        with st.expander("Elegir con listas (alternativa)"):
-            ids = [o["id"] for o in objetos]
-            v_new = st.selectbox("Vivienda", ids, index=ids.index(ss.vivienda_id), format_func=lambda i: etiqueta(por_id[i]),
-                                 key=f"lv_{ss.mapa_v}")
-            o_new = st.multiselect("Obstrucciones", [i for i in ids if i != v_new], default=[i for i in ss.obs_ids if i != v_new],
-                                   format_func=lambda i: etiqueta(por_id[i]), key=f"lo_{ss.mapa_v}")
-            if v_new != ss.vivienda_id or o_new != ss.obs_ids:
-                ss.vivienda_id, ss.obs_ids = v_new, o_new
-                ss.mapa_v += 1
-                st.rerun()
+        st.markdown("#### Ficha del objeto")
+        oid = ss.foco_id if ss.get("foco_id") in por_id else None
+        ref = cota_f + h_def
+        if oid is None:
+            st.caption("Aún no has elegido ninguno. **Haz clic sobre un edificio del plano.**")
+        else:
+            o, d = por_id[oid], dato(oid)
+            st.markdown(f"**{d['nombre']}**  \n<span style='color:#888'>capa {o['capa']} · id {oid}</span>", unsafe_allow_html=True)
+            if oid == ss.vivienda_id:
+                st.success("Esta es la **vivienda evaluada**. Para cambiarla, haz clic en otro contorno y márcalo como vivienda.")
+            else:
+                rol_act = "Obstrucción" if oid in ss.obs_ids else "No usar"
+                rol = st.radio("¿Qué es?", ["Obstrucción", "No usar", "Vivienda evaluada"], index=["Obstrucción", "No usar", "Vivienda evaluada"].index(rol_act),
+                               key=f"rol_{oid}_{ss.mapa_v}", horizontal=False,
+                               help="Obstrucción: bloquea el sol sobre la vivienda y cuenta en el cálculo. No usar: se ignora.")
+                if rol == "Vivienda evaluada":
+                    ss.vivienda_id = oid
+                    ss.obs_ids = [i for i in ss.obs_ids if i != oid]
+                    ss.mapa_v += 1
+                    st.rerun()
+                elif rol == "Obstrucción" and oid not in ss.obs_ids:
+                    ss.obs_ids = ss.obs_ids + [oid]
+                elif rol == "No usar" and oid in ss.obs_ids:
+                    ss.obs_ids = [i for i in ss.obs_ids if i != oid]
+                if rol == "Obstrucción":
+                    d["nombre"] = st.text_input("Nombre", value=d["nombre"], key=f"nom_{oid}")
+                    alt = st.number_input("Altura del edificio (m)", value=None if pd.isna(d["altura"]) else float(d["altura"]),
+                                          min_value=0.0, step=0.5, placeholder="Escribe la altura…", key=f"alt_{oid}_{ss.alt_v}",
+                                          help="Desde el suelo al pie del edificio hasta su techo (o la altura promedio si es irregular).")
+                    d["altura"] = NAN if alt is None else float(alt)
+                    d["cota"] = float(st.number_input("Nivel del terreno al pie (m)", value=float(d["cota"]), step=0.1, key=f"cota_{oid}",
+                                                      help="Si el terreno es plano déjalo en 0. Si hay desnivel, usa la misma referencia que la cota del terreno en la fachada (barra lateral)."))
+                    if alt is None:
+                        st.warning("Escribe la altura del edificio para que cuente en el cálculo.")
+                    else:
+                        techo = d["cota"] + d["altura"]
+                        st.markdown(f"Cota del techo: **{fmt(techo)} m**  \nPunto medio de la fachada: **{fmt(ref)} m**  \n"
+                                    f"Diferencia **A = {fmt(techo - ref)} m**")
+                        if techo - ref <= 0:
+                            st.info("No supera el punto medio de la fachada: no obstruye.")
+        falt = _falta_altura()
+        st.markdown("---")
+        st.caption(f"Vivienda: **{vivienda['nombre'] or vivienda['id']}** · Obstrucciones: **{len(ss.obs_ids)}**")
+        if falt:
+            st.warning("Faltan alturas en: " + ", ".join(dato(i)["nombre"] for i in falt) + ". Haz clic en ellos (naranjas) para completarlas.")
+        st.caption("Colores: azul = vivienda · rojo = obstrucción · naranja = falta altura · gris = no se usa · borde amarillo = el que estás editando · rombo naranja = fachada elegida.")
+
     with c1:
         objs_sel = [{"id": o["id"], "nombre": dato(o["id"])["nombre"] if o["id"] != ss.vivienda_id else (o["nombre"] or "Vivienda"),
                      "puntos": o["puntos"], "capa": o["capa"]} for o in objetos]
         fig_sel = figura_seleccion(entidades, objs_sel, ss.vivienda_id, ss.obs_ids, aristas=aristas, arista_sel=ss.arista,
-                                   titulo=f"Modo: {modo_clic}")
+                                   titulo="Haz clic en un edificio (o en un rombo para elegir la fachada)",
+                                   foco_id=ss.foco_id, sin_altura=_falta_altura())
         evento = grafico_clic(fig_sel, key=f"mapa_{plano_id}_{ss.mapa_v}")
     clics = ids_desde_evento(evento)
     if clics:
-        ss.vivienda_id, ss.obs_ids, ss.arista = actualizar_seleccion(modo_key, clics, ss.vivienda_id, ss.obs_ids, ss.arista)
+        for c in clics:
+            if c.startswith("ARISTA:"):
+                ss.arista = int(c.split(":")[1])
+            elif c in por_id:
+                ss.foco_id = c
         ss.mapa_v += 1
         st.rerun()
 
-    st.markdown("#### Altura de cada obstrucción y terreno en su punto")
-    st.caption("Altura del edificio = desde su propio terreno hasta el techo (o altura promedio si es irregular). "
-               "Cota del terreno = nivel del suelo al pie del edificio, con la misma referencia que la cota del terreno en la fachada. "
-               "A = (cota del terreno + altura del edificio) − cota del punto medio de la fachada.")
+    st.markdown("#### Resumen de obstrucciones")
     if ss.obs_ids:
-        df_obs = pd.DataFrame([{"Nombre": dato(i)["nombre"], "Capa": por_id[i]["capa"], "Altura edificio (m)": dato(i)["altura"],
-                                "Cota terreno al pie (m)": dato(i)["cota"], "ID": i} for i in ss.obs_ids])
-        editado = st.data_editor(df_obs, hide_index=True, disabled=["Capa", "ID"],
-                                 key=f"tabla_{plano_id}_{abs(hash(tuple(ss.obs_ids)))}",
-                                 column_config={"Altura edificio (m)": st.column_config.NumberColumn(min_value=0.0, step=0.5, format="%.2f"),
-                                                "Cota terreno al pie (m)": st.column_config.NumberColumn(step=0.1, format="%.2f")})
-        for _, r in editado.iterrows():
-            d = dato(r["ID"])
-            d["nombre"], d["altura"] = str(r["Nombre"]), r["Altura edificio (m)"]
-            d["cota"] = 0.0 if pd.isna(r["Cota terreno al pie (m)"]) else float(r["Cota terreno al pie (m)"])
-        ref = cota_f + h_def
         filas_dif = []
         for i in ss.obs_ids:
             d = dato(i)
             techo = None if pd.isna(d["altura"]) else d["cota"] + d["altura"]
-            filas_dif.append({"Obstrucción": d["nombre"], "Cota del techo (m)": None if techo is None else round(techo, 2),
-                              "Cota punto medio fachada (m)": round(ref, 2),
-                              "Diferencia A (m)": None if techo is None else round(techo - ref, 2),
-                              "Estado": "sin altura" if techo is None else ("no obstruye (A ≤ 0)" if techo - ref <= 0 else "obstruye")})
-        st.markdown("**Diferencia de altura frente al punto medio** (con el punto medio por defecto; una fachada irregular puede tener otro valor)")
+            filas_dif.append({"Obstrucción": d["nombre"], "Altura (m)": None if pd.isna(d["altura"]) else d["altura"],
+                              "Terreno al pie (m)": d["cota"], "Cota techo (m)": None if techo is None else round(techo, 2),
+                              "A = techo − punto medio (m)": None if techo is None else round(techo - ref, 2),
+                              "Estado": "falta altura" if techo is None else ("no obstruye (A ≤ 0)" if techo - ref <= 0 else "obstruye")})
         mostrar(pd.DataFrame(filas_dif), hide_index=True)
     else:
-        st.info("Aún no hay obstrucciones elegidas. Pon el modo en «Obstrucciones» y haz clic sobre los contornos.")
+        st.info("Aún no hay obstrucciones. Haz clic en un edificio del plano y márcalo como «Obstrucción».")
+
+    with st.expander("Más opciones: elegir con listas"):
+        ids = [o["id"] for o in objetos]
+        v_new = st.selectbox("Vivienda", ids, index=ids.index(ss.vivienda_id), format_func=lambda i: etiqueta(por_id[i]),
+                             key=f"lv_{ss.vivienda_id}")
+        o_new = st.multiselect("Obstrucciones", [i for i in ids if i != v_new], default=[i for i in ss.obs_ids if i != v_new],
+                               format_func=lambda i: etiqueta(por_id[i]), key=f"lo_{v_new}_{abs(hash(tuple(ss.obs_ids)))}")
+        if v_new != ss.vivienda_id or o_new != ss.obs_ids:
+            ss.vivienda_id, ss.obs_ids = v_new, o_new
+            ss.mapa_v += 1
+            st.rerun()
 
 # ------------------------------------------------------------------- cálculo
 obstrucciones, avisos = [], []
@@ -317,8 +352,10 @@ for o in objetos:
 if not fachadas:
     st.error("La vivienda no tiene aristas utilizables como fachada.")
     st.stop()
-for a in avisos:
-    st.warning(a)
+if avisos:
+    with ph_avisos.container():
+        for a_ in avisos:
+            st.warning(a_)
 
 excluidos_por_fachada: dict[str, set] = {}
 
@@ -521,6 +558,7 @@ with tabs[1]:
             m3.metric("Altura equivalente del edificio", f"{fmt(total_sobre_terreno)} m")
             if st.button("Aplicar como altura del edificio", key="aplicar_prom"):
                 ss.datos_obs[oid]["altura"] = float(total_sobre_terreno)
+                ss.alt_v += 1
                 st.rerun()
         elif info:
             st.info("El obstáculo no sobrepasa el punto medio de la fachada: no obstruye.")
