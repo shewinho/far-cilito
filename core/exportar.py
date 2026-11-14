@@ -40,10 +40,17 @@ def a_dict(res: ResultadoFachada, vivienda_id: str, excluidos: set[tuple[int, st
     }
 
 
-def a_dict_multiple(resultados: list[ResultadoFachada], vivienda_id: str, excluidos_por_fachada: dict, origen_dxf: str) -> dict:
-    """Varias fachadas en un solo JSON. excluidos_por_fachada: {nombre_fachada: {(division, obstruccion_id), ...}}"""
+def a_dict_multiple(resultados: list[ResultadoFachada], vivienda_id: str, excluidos_por_fachada: dict, origen_dxf: str,
+                    unidades: dict | None = None) -> dict:
+    """Varias fachadas en un solo JSON. excluidos_por_fachada: {nombre_fachada: {(division, obstruccion_id), ...}}
+
+    unidades: {'dxf', 'factor_a_metros', 'origen', 'coordenadas'} de la lectura del DXF.
+    """
     fachadas = [a_dict(r, vivienda_id, excluidos_por_fachada.get(r.fachada.nombre, set()), origen_dxf) for r in resultados]
-    return {"version_reglas": VERSION_REGLAS, "archivo": origen_dxf, "vivienda_id": vivienda_id,
-            "generado": fachadas[0]["generado"] if fachadas else None,
-            "fachadas": [{k: v for k, v in f.items() if k not in ("version_reglas", "archivo", "vivienda_id", "generado")} for f in fachadas],
-            "far_final": "No calculado: ecuación FAR(A,B,D) pendiente de validación con MINVU"}
+    salida = {"version_reglas": VERSION_REGLAS, "archivo": origen_dxf, "vivienda_id": vivienda_id,
+              "generado": fachadas[0]["generado"] if fachadas else None,
+              "fachadas": [{k: v for k, v in f.items() if k not in ("version_reglas", "archivo", "vivienda_id", "generado")} for f in fachadas],
+              "far_final": "No calculado: ecuación FAR(A,B,D) pendiente de validación con MINVU"}
+    if unidades:
+        salida["unidades"] = dict(unidades)
+    return salida

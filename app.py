@@ -1,5 +1,6 @@
 import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -8,9 +9,10 @@ import streamlit as st
 from core.alzado import altura_promedio, centro_alzado, figura_altura_promedio, figura_alzado
 from core.dibujo import figura_far
 from core.exportar import a_dict_multiple
+from core.exportar_pdf import memoria_pdf
 from core.far import (ALTURA_PUNTO_MEDIO_DEFECTO, Fachada, Obstruccion, aristas_vivienda, calcular_fachada,
                       fachada_desde_arista, fachadas_de_vivienda, nombre_orientacion, punto_medio_discontinuo)
-from core.importador import ImportadorDXF
+from core.importador import UNIDADES_MANUALES, ImportadorDXF, inspeccionar_unidades, resolver_unidad
 from core.reglas import VERSION_REGLAS
 from core.seleccion import actualizar_seleccion, figura_seleccion, ids_desde_evento
 
@@ -57,17 +59,29 @@ def grafico_clic(fig, key):
 
 
 @st.cache_data(show_spinner="Leyendo DXF…")
-def importar(contenido: bytes):
+def importar(contenido: bytes, unidad: str):
     with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
         tmp.write(contenido)
         ruta = tmp.name
     try:
-        imp = ImportadorDXF(ruta)
+        imp = ImportadorDXF(ruta, unidad=unidad)   # la unidad elegida solo se usa si el DXF no la declara
         ents = imp.extraer_geometria()
         objs = imp.extraer_objetos()
+        sueltas = imp.lineas_sin_contorno
     finally:
         Path(ruta).unlink(missing_ok=True)
-    return ents, objs
+    return ents, objs, sueltas
+
+
+@st.cache_data(show_spinner="Leyendo unidades del DXF…")
+def unidades_dxf(contenido: bytes) -> dict:
+    with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
+        tmp.write(contenido)
+        ruta = tmp.name
+    try:
+        return inspeccionar_unidades(ruta)
+    finally:
+        Path(ruta).unlink(missing_ok=True)
 
 
 # =============================================================== 1. Plano
@@ -89,8 +103,26 @@ if contenido is None:
             "(se puede corregir con la rotación del Norte). Después eliges la vivienda, las obstrucciones y la fachada haciendo clic en el plano.")
     st.stop()
 
+# ---- unidades: si el DXF no las declara hay que elegirlas antes de calcular nada
+info_u = unidades_dxf(contenido)
+eleccion = None
+if info_u["factor"] is None:
+    with st.sidebar:
+        st.header("1b. Unidad del dibujo")
+        st.info("El DXF no declara unidades ($INSUNITS). Elige en qué unidad está dibujado para continuar.")
+        if info_u.get("sugerencia"):
+            st.caption(f"Pista: el dibujo mide unas {info_u['extension']:,.0f} unidades; por su tamaño "
+                       f"parece estar en {info_u['sugerencia']}.".replace(",", "."))
+        eleccion = st.selectbox("Unidad del dibujo", list(UNIDADES_MANUALES), index=None,
+                                placeholder="Elige m, cm o mm", key="unidad_manual")
+    if eleccion is None:
+        st.stop()
+unidad, factor, origen_unidad = resolver_unidad(info_u, eleccion)
+unidades = {"dxf": unidad, "factor_a_metros": factor, "origen": origen_unidad, "coordenadas": "m"}
+
+
 try:
-    entidades, objetos = importar(contenido)
+    entidades, objetos, lineas_sueltas = importar(contenido, unidad)
 except Exception as e:
     st.error(f"No pude leer el DXF: {e}")
     st.stop()
@@ -140,6 +172,11 @@ vivienda = por_id[ss.vivienda_id]
 # =============================================================== 2. Fachada (barra lateral)
 with st.sidebar:
     st.success(f"{origen}: {len(entidades)} entidades, {len(objetos)} contornos cerrados.")
+    st.caption(f"Unidad del DXF: **{unidad}** ({origen_unidad}), factor {f'{factor:.6g}'.replace('.', ',')} → m.")
+    for capa, handles in sorted(lineas_sueltas.items()):
+        n = len(handles)
+        st.info(f"{n} línea{'s' if n != 1 else ''} de la capa {capa} no forma{'n' if n != 1 else ''} un contorno "
+                f"cerrado y no se puede{'n' if n != 1 else ''} seleccionar.")
     st.caption(f"Vivienda: **{vivienda['nombre'] or vivienda['id']}** · Obstrucciones: **{len(ss.obs_ids)}** "
                "(se eligen con clic en la pestaña «Plano y selección»).")
     st.markdown("---")
@@ -422,9 +459,58 @@ with tabs[2]:
     else:
         mostrar(cev, hide_index=True)
         st.download_button("📥 Descargar CSV", cev.to_csv(index=False).encode("utf-8-sig"), file_name="far_resumen.csv", mime="text/csv")
-    datos = a_dict_multiple(resultados, ss.vivienda_id, excluidos_por_fachada, origen)
+    datos = a_dict_multiple(resultados, ss.vivienda_id, excluidos_por_fachada, origen, unidades)
     st.download_button("📥 Descargar JSON (trazabilidad)", json.dumps(datos, indent=2, ensure_ascii=False),
                        file_name="far_resultados.json", mime="application/json")
+
+    # ---- memoria de cálculo en PDF: se genera solo al presionar el botón y se guarda con la
+    # huella de las entradas que la componen, para descartarla en cuanto alguna cambie.
+    def _norm(x):
+        return None if x is None or pd.isna(x) else round(float(x), 6)
+
+    def firma_memoria() -> str:
+        """Huella de todas las entradas que cambian el contenido de la memoria PDF."""
+        return json.dumps({
+            "plano": plano_id,
+            "unidades": unidades,
+            "vivienda": ss.vivienda_id,
+            "obstrucciones": list(ss.obs_ids),
+            "datos_obstrucciones": {i: {"nombre": dato(i)["nombre"], "altura": _norm(dato(i)["altura"]),
+                                        "cota": _norm(dato(i)["cota"])} for i in ss.obs_ids},
+            "criterio": criterio,
+            "rotacion_norte": _norm(rot),
+            "cota_fachada": _norm(cota_f),
+            "alturas_punto_medio": {k: _norm(v) for k, v in ss.h_mid_fachada.items()},
+            "fachadas": [[f.nombre, round(f.azimut_real, 6), [_norm(c) for c in f.punto_medio]] for f in fachadas],
+            "excluidos": {k: sorted(list(v)) for k, v in excluidos_por_fachada.items()},
+        }, sort_keys=True, ensure_ascii=False)
+
+    st.markdown("---")
+    st.markdown("**Memoria de cálculo (PDF)**")
+    firma = firma_memoria()
+    if ss.get("pdf_firma") != firma:
+        ss.pdf_memoria = ss.pdf_firma = ss.pdf_fecha = ss.pdf_nombre = None
+
+    if st.button("📄 Preparar memoria PDF", help="Incluye los datos de la vivienda, la tabla de A, B y D, "
+                                                  "la lámina y el aviso del FAR bloqueado."):
+        try:
+            ahora = datetime.now(timezone.utc)
+            with st.spinner("Generando la memoria de cálculo…"):
+                ss.pdf_memoria = memoria_pdf(resultados, ss.vivienda_id, origen,
+                                             excluidos_por_fachada=excluidos_por_fachada, fecha=ahora,
+                                             unidades=unidades)
+            ss.pdf_firma, ss.pdf_fecha = firma, ahora
+            ss.pdf_nombre = f"FAR_{ss.vivienda_id}_{ahora:%Y%m%d}.pdf"
+        except Exception as e:
+            ss.pdf_memoria = ss.pdf_firma = ss.pdf_fecha = ss.pdf_nombre = None
+            st.error(f"No pude generar la memoria PDF: {e}. El CSV y el JSON siguen disponibles.")
+
+    if ss.get("pdf_memoria") and ss.get("pdf_firma") == firma:
+        st.download_button("📥 Descargar memoria PDF", data=ss.pdf_memoria, file_name=ss.pdf_nombre,
+                           mime="application/pdf", key="dl_pdf")
+        st.caption(f"Memoria generada el {ss.pdf_fecha:%Y-%m-%d %H:%M} UTC con las entradas actuales. "
+                   "Si cambias el DXF, la selección, las alturas o el criterio, deberás prepararla de nuevo.")
+
     with st.expander("📖 Reglas del manual aplicadas"):
         st.markdown("""
 - **Centro de la fachada**: punto medio del ancho; con retranqueos, Ecuación 5 `X = D·Área_b/(Área_a+Área_b)`. En alzado, centro del paralelepípedo que inscribe el área de la fachada (pestaña «Alzado e irregulares»).
