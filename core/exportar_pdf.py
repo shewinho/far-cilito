@@ -186,7 +186,13 @@ def _pie(canvas, doc) -> None:
     canvas.restoreState()
 
 
-def _tabla_datos(res: ResultadoFachada, vivienda_id: str, origen_dxf: str, fecha: str) -> Table:
+def _factor_txt(factor: float) -> str:
+    """0.001 -> '0,001'; 1.0 -> '1'."""
+    return f"{factor:.6g}".replace(".", ",")
+
+
+def _tabla_datos(res: ResultadoFachada, vivienda_id: str, origen_dxf: str, fecha: str,
+                 unidades: dict | None = None) -> Table:
     f = res.fachada
     pares = [
         ("Vivienda", str(vivienda_id)),
@@ -200,6 +206,11 @@ def _tabla_datos(res: ResultadoFachada, vivienda_id: str, origen_dxf: str, fecha
         ("Archivo DXF", origen_dxf),
         ("Generado", fecha),
     ]
+    if unidades:
+        pares += [
+            ("Unidad del DXF", f"{unidades.get('dxf', '—')} ({unidades.get('origen', '—')})"),
+            ("Factor a metros", f"{_factor_txt(unidades.get('factor_a_metros') or 0)} → coordenadas en m"),
+        ]
     filas = []
     for i in range(0, len(pares), 2):
         a = pares[i]
@@ -270,7 +281,7 @@ def _aviso_far() -> Table:
 
 
 def _historia(resultados: list[ResultadoFachada], vivienda_id: str, origen_dxf: str,
-              excluidos_por_fachada: dict, fecha: str) -> list:
+              excluidos_por_fachada: dict, fecha: str, unidades: dict | None = None) -> list:
     historia: list = [
         Paragraph("Memoria de cálculo FAR", _ESTILO_TITULO),
         Paragraph("Manual de Procedimientos CEV 2025 · secciones 6.8 y 11.8 · "
@@ -281,7 +292,7 @@ def _historia(resultados: list[ResultadoFachada], vivienda_id: str, origen_dxf: 
         excluidos = excluidos_por_fachada.get(res.fachada.nombre, set())
         historia += [
             Paragraph(res.fachada.nombre, _ESTILO_H2),
-            _tabla_datos(res, vivienda_id, origen_dxf, fecha),
+            _tabla_datos(res, vivienda_id, origen_dxf, fecha, unidades),
             Paragraph("Obstrucciones por división", _ESTILO_SECCION),
             _tabla_obstrucciones(res, excluidos),
         ]
@@ -309,11 +320,13 @@ def _historia(resultados: list[ResultadoFachada], vivienda_id: str, origen_dxf: 
 
 def memoria_pdf(resultados: list[ResultadoFachada], vivienda_id: str, origen_dxf: str,
                 excluidos_por_fachada: dict | None = None,
-                fecha: datetime | None = None) -> bytes:
+                fecha: datetime | None = None,
+                unidades: dict | None = None) -> bytes:
     """Devuelve el PDF de la memoria de cálculo (una sección por fachada).
 
     excluidos_por_fachada: {nombre_fachada: {(division, obstruccion_id), ...}}.
     fecha: instante a informar; por defecto, ahora en UTC.
+    unidades: {'dxf', 'factor_a_metros', 'origen', ...} para la trazabilidad del PDF.
     """
     if not resultados:
         raise ValueError("Se necesita al menos una fachada calculada para generar la memoria.")
@@ -332,5 +345,5 @@ def memoria_pdf(resultados: list[ResultadoFachada], vivienda_id: str, origen_dxf
     marco = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="normal",
                   leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     doc.addPageTemplates([PageTemplate(id="pagina", frames=[marco], onPage=_pie)])
-    doc.build(_historia(resultados, vivienda_id, origen_dxf, excluidos_por_fachada, sello))
+    doc.build(_historia(resultados, vivienda_id, origen_dxf, excluidos_por_fachada, sello, unidades))
     return buf.getvalue()
