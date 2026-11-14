@@ -9,10 +9,12 @@ from __future__ import annotations
 import re
 import ezdxf
 from ezdxf import path as ezpath
+from shapely import set_precision
 from shapely.geometry import LineString, Polygon, Point
 from shapely.ops import unary_union, polygonize
 
 TOL_CIERRE = 1e-6
+TOL_SNAP = 1e-3  # en unidades del dibujo (no en milímetros): absorbe el ruido de redondeo de los exportadores CAD
 FLATTEN = 0.05  # unidades del dibujo (m)
 
 
@@ -79,8 +81,13 @@ class ImportadorDXF:
         return self.entidades
 
     def extraer_objetos(self):
-        """Polígonos cerrados: [{'id','capa','puntos','nombre','altura_capa','origen'}]"""
+        """Polígonos cerrados: [{'id','capa','puntos','nombre','altura_capa','origen'}]
+
+        Deja además en lineas_sin_contorno {capa: [handles]} las líneas abiertas que no entraron
+        en ningún polígono: se dibujan, pero no se pueden seleccionar.
+        """
         self._leer()
+        self.lineas_sin_contorno: dict[str, list[str]] = {}
         objetos, abiertas = [], {}
         for e in self.entidades:
             if e["cerrado"]:
@@ -90,13 +97,20 @@ class ImportadorDXF:
                 if len(pts) >= 3 and Polygon(pts).area > 1e-6:
                     objetos.append({"id": e["handle"], "capa": e["capa"], "puntos": pts, "origen": "polilínea cerrada"})
                     continue
-            abiertas.setdefault(e["capa"], []).append(LineString(e["puntos"]))
+            abiertas.setdefault(e["capa"], []).append((e["handle"], LineString(e["puntos"])))
         for capa, lineas in abiertas.items():           # contornos formados por líneas sueltas
             try:
-                for i, poly in enumerate(polygonize(unary_union(lineas)), 1):
-                    if poly.area > 1e-6:
-                        objetos.append({"id": f"LN:{capa}:{i}", "capa": capa,
-                                        "puntos": list(poly.exterior.coords)[:-1], "origen": "líneas unidas"})
+                # Los extremos que deberían coincidir suelen diferir en el último decimal si el dibujo usa
+                # coordenadas grandes; se ajustan a una rejilla antes de polygonize o el anillo no cierra.
+                geom = set_precision(unary_union([ln for _, ln in lineas]), TOL_SNAP)
+                polys = [p for p in polygonize(geom) if p.area > 1e-6]
+                borde = unary_union([p.boundary for p in polys]).buffer(TOL_SNAP)
+                sueltas = [h for h, ln in lineas if not borde.covers(ln)]
+                if sueltas:
+                    self.lineas_sin_contorno[capa] = sueltas
+                for i, poly in enumerate(polys, 1):
+                    objetos.append({"id": f"LN:{capa}:{i}", "capa": capa,
+                                    "puntos": list(poly.exterior.coords)[:-1], "origen": "líneas unidas"})
             except Exception:
                 pass
         for o in objetos:                               # nombre = TEXT contenido en el polígono
